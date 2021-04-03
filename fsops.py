@@ -40,10 +40,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 '''
 
 import os
-import sys
+
 
 import pyfuse3
-from argparse import ArgumentParser
+
 import errno
 import logging
 import stat as stat_m
@@ -57,7 +57,7 @@ faulthandler.enable()
 
 log = logging.getLogger(__name__)
 
-class Operations(pyfuse3.Operations):
+class HSMCacheFS(pyfuse3.Operations):
 
     enable_writeback_cache = True
 
@@ -474,59 +474,3 @@ class Operations(pyfuse3.Operations):
         pass
 
 
-
-def init_logging(debug=False):
-    formatter = logging.Formatter('%(asctime)s.%(msecs)03d %(threadName)s: '
-                                  '[%(name)s] %(message)s', datefmt="%Y-%m-%d %H:%M:%S")
-    handler = logging.StreamHandler()
-    handler.setFormatter(formatter)
-    root_logger = logging.getLogger()
-    if debug:
-        handler.setLevel(logging.DEBUG)
-        root_logger.setLevel(logging.DEBUG)
-    else:
-        handler.setLevel(logging.INFO)
-        root_logger.setLevel(logging.INFO)
-    root_logger.addHandler(handler)
-
-
-def parse_args(args):
-    '''Parse command line'''
-
-    parser = ArgumentParser()
-
-    parser.add_argument('source', type=str,
-                        help='Directory tree to mirror')
-    parser.add_argument('mountpoint', type=str,
-                        help='Where to mount the file system')
-    parser.add_argument('--debug', action='store_true', default=False,
-                        help='Enable debugging output')
-    parser.add_argument('--debug-fuse', action='store_true', default=False,
-                        help='Enable FUSE debugging output')
-
-    return parser.parse_args(args)
-
-def main():
-    options = parse_args(sys.argv[1:])
-    init_logging(options.debug)
-    operations = Operations(options.source)
-
-    log.debug('Mounting...')
-    fuse_options = set(pyfuse3.default_options)
-    fuse_options.add('fsname=passthroughfs')
-    if options.debug_fuse:
-        fuse_options.add('debug')
-    pyfuse3.init(operations, options.mountpoint, fuse_options)
-
-    try:
-        log.debug('Entering main loop..')
-        trio.run(pyfuse3.main)
-    except:
-        pyfuse3.close(unmount=False)
-        raise
-
-    log.debug('Unmounting..')
-    pyfuse3.close()
-
-if __name__ == '__main__':
-    main()

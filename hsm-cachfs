@@ -1,0 +1,76 @@
+#!/usr/bin/python3
+from fsops import HSMCacheFS as Operations
+import fsops
+log = fsops.log
+
+from argparse import ArgumentParser
+import logging
+import pyfuse3
+import trio
+import sys
+
+def init_logging(debug=False):
+    formatter = logging.Formatter('%(asctime)s.%(msecs)03d %(threadName)s: '
+                                  '[%(name)s] %(message)s',
+                                  #datefmt="%Y-%m-%d %H:%M:%S"
+                                  datefmt="%H:%M:%S")
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+    root_logger = logging.getLogger()
+    if debug:
+        handler.setLevel(logging.DEBUG)
+        root_logger.setLevel(logging.DEBUG)
+    else:
+        handler.setLevel(logging.INFO)
+        root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(handler)
+
+def parse_args(args):
+    '''Parse command line'''
+
+    parser = ArgumentParser()
+
+    parser.add_argument('source', type=str,
+                        help='Directory tree to mirror')
+    parser.add_argument('mountpoint', type=str,
+                        help='Where to mount the file system')
+    parser.add_argument('--debug', action='store_true', default=False,
+                        help='Enable debugging output')
+    parser.add_argument('--debug-fuse', action='store_true', default=False,
+                        help='Enable FUSE debugging output')
+
+    return parser.parse_args(args)
+
+
+def main():
+    options = parse_args(sys.argv[1:])
+    init_logging(options.debug)
+    operations = Operations(options.source)
+
+    log.debug('Mounting...')
+    fuse_options = set(pyfuse3.default_options)
+    fuse_options.add('fsname=hsmcachefs')
+    if options.debug_fuse:
+        fuse_options.add('debug')
+    pyfuse3.init(operations, options.mountpoint, fuse_options)
+
+    unmounted = False
+    try:
+        log.debug('Entering main loop..')
+        trio.run(pyfuse3.main)
+    except KeyboardInterrupt:
+        log.debug('Unmounting due to Ctrl+C')
+        pyfuse3.close()
+        unmounted = True
+    except:
+        pyfuse3.close(unmount=False)
+        raise
+
+    if unmounted:
+        return
+    log.debug('Unmounting..')
+    pyfuse3.close()
+
+
+if __name__ == '__main__':
+    main()
