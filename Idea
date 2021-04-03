@@ -1,0 +1,27 @@
+hsm-cachefs soll:
+ - LRU Caching können ( nach Dateigröße )
+   -> löst Storage Management
+ - Kompletten Verzeichnisbaum des eingehängten Ordners kopieren
+ -> einfachere Bedienung, einfacheres Interface
+   - alle dazugehörigen Metainfos auch bereitstellen können ( da nicht viel Platz einnehmend ) 
+   -> wegen Suchanfragen
+ - Tägliches Writeback auf den entfernten Ordner
+ -> Datenredudanz
+ => eigentlich keine FS Aufgabe
+   - Änderungen loggen
+   -> Erleichtert Backup-Prozess
+   -> Gibt Zusatzinfos zu Fehlern
+ - Möglichkeit entfernten Ordner selbst zu mounten durch wakeonlan
+ -> Dateien holen falls nicht vorhanden
+ => bei open bzw list befehlen nachschauen ob die Datei bereits irgendwo lokal bereits ist
+
+
+Ordner-Aufbau:
+-> remote ( Einhängepunkt für entferntes Dateisystem )
+-> cache  ( Lokale Daten von remote werden hier abgespeichert und mittels LRU verdrängt )
+-> view   ( mountpoint den andere Programme benutzen )
+Zusatzdateien:
+-> metafile ( sql datastore for extended attributed etc )
+-> logfile  ( journal file )
+
+
