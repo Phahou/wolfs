@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 from fsops import HSMCacheFS as Operations
 import fsops
-log = fsops.log
+#log = fsops.log
 
 from argparse import ArgumentParser
 import logging
@@ -25,6 +25,10 @@ def init_logging(debug=False):
         root_logger.setLevel(logging.INFO)
     root_logger.addHandler(handler)
 
+def init_db(debug=False):
+    pass
+
+
 def parse_args(args):
     '''Parse command line'''
 
@@ -34,20 +38,26 @@ def parse_args(args):
                         help='Directory tree to mirror')
     parser.add_argument('mountpoint', type=str,
                         help='Where to mount the file system')
+    parser.add_argument('cache', type=str,
+                        help='Local Datastore of remote Directory')
+    parser.add_argument('metadb', type=str, default='metaInfo.db',
+                        help='sqlite3-directory storage')
+    parser.add_argument('log', type=str, default='fileJournal.log',
+                        help='Journal-file to write logs to')
     parser.add_argument('--debug', action='store_true', default=False,
                         help='Enable debugging output')
     parser.add_argument('--debug-fuse', action='store_true', default=False,
                         help='Enable FUSE debugging output')
-
     return parser.parse_args(args)
 
 
 def main():
     options = parse_args(sys.argv[1:])
     init_logging(options.debug)
-    operations = Operations(options.source)
+    #remote = RemoteFS()
+    operations = Operations(None, options.source, options.cache, options.metadb, options.log)
 
-    log.debug('Mounting...')
+    #log.debug('Mounting...')
     fuse_options = set(pyfuse3.default_options)
     fuse_options.add('fsname=hsmcachefs')
     if options.debug_fuse:
@@ -56,10 +66,10 @@ def main():
 
     unmounted = False
     try:
-        log.debug('Entering main loop..')
+        #log.debug('Entering main loop..')
         trio.run(pyfuse3.main)
     except KeyboardInterrupt:
-        log.debug('Unmounting due to Ctrl+C')
+        #log.debug('Unmounting due to Ctrl+C')
         pyfuse3.close()
         unmounted = True
     except:
@@ -68,7 +78,7 @@ def main():
 
     if unmounted:
         return
-    log.debug('Unmounting..')
+    #log.debug('Unmounting..')
     pyfuse3.close()
 
 
