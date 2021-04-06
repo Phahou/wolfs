@@ -1,1 +1,1 @@
-sudo umount -f -l remote
+sudo umount -f -l mnt/mountpoint
