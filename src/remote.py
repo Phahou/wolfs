@@ -4,7 +4,6 @@ from icmplib import ping
 import trio
 from errors import MountError, WakeupError
 from pathlib import Path
-import sh
 
 import ctypes
 import ctypes.util
@@ -12,7 +11,6 @@ import os
 
 libc = ctypes.CDLL(ctypes.util.find_library('c'), use_errno=True)
 libc.mount.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_ulong, ctypes.c_char_p)
-
 
 def mount(source, target, fs, options=''):
 	ret = libc.mount(source.encode(), target.encode(), fs.encode(), 0, options.encode())
@@ -40,12 +38,12 @@ class RemoteNode:
 		self.ip = ip
 
 	def isOnline(self):
-		'sends every 0.5s a ping to check if host is up. Returns after first received ping.'
+		"""sends every 0.5s a ping to check if host is up. Returns after first received ping."""
 		host = ping(self.ip, interval=0.5, timeout=self.ping_timeout, privileged=False)
 		return host.is_alive
 
 	async def wakeup(self):
-		'sends every sec a magic packet to across network assuming it is in the same LAN'
+		"""sends every sec a magic packet to across network assuming it is in the same LAN"""
 		with trio.move_on_after(self.wakeuptimeout) as cancel_scope:
 			while 1:
 				if self.isOnline():
@@ -53,12 +51,15 @@ class RemoteNode:
 		if cancel_scope.cancelled_caught:
 			raise WakeupError
 
-	# check if remote FS is accessible
 	def isMounted(self):
+		"""checks if remote FS is accessible"""
 		return self.mountPoint.is_mount()
 
-	# be sure to have the user option in your fstab
 	async def mountRemoteFS(self):
+		"""
+		:NOTICE: Needs to have the user option in fstab enabled to work
+		Mounts the remote filesystem
+		"""
 		if not self.isOnline():
 			await self.wakeup()
 			mount(self.remoteSource, self.mountPoint, fs=self.remoteFS, options=self.mountOpts)

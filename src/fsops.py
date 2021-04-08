@@ -9,9 +9,6 @@ import stat as stat_m
 from pyfuse3 import FUSEError
 from os import fsencode, fsdecode
 from collections import defaultdict
-from queue import PriorityQueue
-from pathlib import Path
-import shutil
 import remote
 
 import faulthandler
@@ -23,71 +20,27 @@ faulthandler.enable()
 
 log = logging.getLogger(__name__)
 from IPython import embed
+from util import Col, MaxPrioQueue
+from disk import Disk
 
 
-class col:
-	BOLD = '\033[1m'
-	B = BOLD
-
-	WHITE = '\033[37m'
-	W = WHITE
-	BW = BOLD + WHITE
-
-	PURPLE = '\033[95m'
-	CYAN = '\033[96m'
-	BC = BOLD + CYAN
-	DARKCYAN = '\033[36m'
-
-	BLUE = '\033[94m'
-	BB = BOLD + BLUE
-
-	GREEN = '\033[92m'
-	BG = BOLD + GREEN
-
-	YELLOW = '\033[93m'
-	BY = BOLD + YELLOW
-
-	RED = '\033[91m'
-	BR = BOLD + RED
-
-	UNDERLINE = '\033[4m'
-	END = '\033[0m'
-
-
-class MaxPrioQueue(PriorityQueue):
-	"""
-	A Max Heap Queue:
-	Shouldnt be used if negative and positive indeces are mixed
-	"""
-
-	# As I dont want to fiddle around with inverting items
-	# while I have other problems at hand
-	def push_nowait(self, item):
-		"Same as PriorityQueue.put_nowait()"
-		return self.put_nowait((-item[0], item[1]))
-
-	def pop_nowait(self):
-		"""Same as PriorityQueue.get_nowait()"""
-		index, data = self.get_nowait()
-		return (-index, data)
+def mute_unused(*args, **kwargs):
+	return args, kwargs
 
 
 class HSMCacheFS(pyfuse3.Operations):
-	__MEGABYTE__ = 1024 * 1024
 	enable_writeback_cache = True
 	enable_acl = True
 
 	def __init__(self, node: remote.RemoteNode, sourceDir: str, cacheDir: str,
-				 metadb=None, log=None, noatime=True, max_cacheSize=4):
+				 metadb=None, logFile=None, noatime=True, maxCacheSizeMB=512):
 		super().__init__()
-		# fs related:
-		self.sourceDir = sourceDir
-		self.cacheDir = cacheDir
-
+		mute_unused(node, remote, metadb, logFile)
 		# unused for now:
 		# self.metadb = metadb
-		# self.log = log
+		# self.log = logFile
 		# self.remote = node
+		self.disk = Disk(sourceDir, cacheDir, maxCacheSizeMB)
 
 		# inode related:
 		self._inode_path_map = {pyfuse3.ROOT_INODE: sourceDir}
@@ -97,96 +50,22 @@ class HSMCacheFS(pyfuse3.Operations):
 		self._inode_fd_map = dict()
 		self._fd_open_count = dict()
 
-		# cache related:
-		self.current_CacheSize = 0
-		self.cacheFill = 0.8
-		self.diskUsagePercent = 1
-		self.max_cacheSize = max_cacheSize * 512 * self.__MEGABYTE__
 		self.time_attr = 'st_mtime_ns' if noatime else 'st_atime_ns'  # remote has mountopt noatime set?
 
 		# initfs
-		self.populate_inode_maps()
+		transfer_q = self.populate_inode_maps()
 
-	def disk_isFull(self):
-		return self.disk_isFilledBy(1.0)
-
-	def get_size(self, start_path='.'):
-		total_size = 0
-		for dirpath, dirnames, filenames in os.walk(start_path):
-			for f in filenames:
-				fp = os.path.join(dirpath, f)
-				# skip if it is symbolic link
-				if not os.path.islink(fp):
-					total_size += os.path.getsize(fp)
-		return total_size
-
-	def disk_isFilledBy(self, percent: float):
-		'percent: float needs to be between 0.0 and 1.0'
-		assert 0.0 < percent < 1.0, 'disk_isFullBy: needs to be [0-1]'
-		diskUsage = self.get_size(self.cacheDir) / self.max_cacheSize
-		return True if diskUsage >= percent else False
-
-	def copyIntoCacheDir(self, src: str, dest: str):
-		# check if directories leading to dest already exist
-		src_p, dest_p = Path(src), Path(dest)
-		if src_p.is_dir():
-			if not dest_p.exists():
-				dest_p.mkdir(parents=True)
-		elif src_p.is_file():
-			if not dest_p.parent.exists():
-				dest_p.mkdir(parents=True)
-			shutil.copy2(src_p, dest_p)
-		else:
-			log.error(f'{col.BY} Unrecognized path: {src_p} -> ignoring')
-
-		# preserve book-keeping
-		dest_p.chmod(src_p.stat().st_mode)
-		shutil.copystat(src_p, dest_p)
-		self.updateCacheSize()
-
-	def disk_canStore(self, path):
-		'update Cache Size needs to be called if file is inserted into cacheDir'
-		usage = self.get_size
-		if os.path.getsize(path) + self.current_CacheSize < self.max_cacheSize:
-			return True
-		else:
-			return False
-
-	def updateCacheSize(self):
-		self.current_CacheSize = self.get_size(self.cacheDir)
-		self.diskUsagePercent = self.current_CacheSize / self.max_cacheSize
-
-	def print_stat(self, entry):
-		'print all common file attributes'
-		attr_list = [
-			'st_ino', 'st_mode', 'st_nlink', 'st_uid', 'st_gid',
-			# 'st_rdev', # root device id is really useless tbh
-			'st_size', 'st_blocks',
-			self.time_attr, 'st_ctime_ns'
-		]
-		if sys.platform in ['bsd', 'OS X']:
-			attr_list.append('st_birthtime_ns')
-
-		for attr in attr_list:
-			attr_val = getattr(entry, attr)
-			attr_str = f'{col.BOLD}{attr}: {col.BC}'
-			if 'st_mode' == attr:
-				attr_str += f'{filemode(attr_val)}'
-			elif 'st_size' == attr:
-				attr_str += f'{attr_val / 1024:.3} KB'
-			elif 'st_blocks' == attr:
-				attr_str += f'{attr_val} * 512 B'
-			elif 'time_ns' in attr:
-				attr_str += f'{datetime.fromtimestamp(attr_val // 1_000_000_000).strftime("%d. %b %Y %H:%M")}'
-			else:
-				attr_str += f'{attr_val}'
-			print(f'{attr_str}{col.END}')
+		# fetch most recently used until cache is 80% full or no more to fetch necessary
+		self.copyRecentFilesIntoCache(transfer_q)
 
 	def populate_inode_maps(self):
-		'index the source filesystem tree'
-		startpath = self.sourceDir
+		"""
+		index the sourceDir filesystem tree
+		:param self.time_attr decides if mtime or atime is used
+		:return: MaxPrioQueue() with most recently edited / accessed files (atime / mtime)
+		"""
 		transfer_q = MaxPrioQueue()
-		for dirpath, dirnames, filenames in os.walk(self.sourceDir):
+		for dirpath, dirnames, filenames in os.walk(self.disk.sourceDir):
 			dir_attrs = self._getattr(path=dirpath)
 			self.print_stat(dir_attrs)
 
@@ -204,34 +83,63 @@ class HSMCacheFS(pyfuse3.Operations):
 				transfer_q.push_nowait((last_used, (file_attrs.st_ino, file_attrs.st_size)))
 				self._add_path(file_attrs.st_ino, filepath, fromPopulate=True)
 
-		# fetch most recently used until cache is 80% full or no more to fetch necessary
-		self.copyRecentFilesIntoCache(transfer_q)
+		return transfer_q
+
+	def print_stat(self, entry):
+		"""print all common file attributes"""
+		attr_list = [
+			'st_ino', 'st_mode', 'st_nlink', 'st_uid', 'st_gid',
+			# 'st_rdev', # root device id is really useless tbh
+			'st_size', 'st_blocks',
+			self.time_attr, 'st_ctime_ns'
+		]
+		if sys.platform in ['bsd', 'OS X']:
+			attr_list.append('st_birthtime_ns')
+
+		for attr in attr_list:
+			# TODO: make tabular
+			#   probably easy with just printing the it like ls -l
+			attr_val = getattr(entry, attr)
+			attr_str = f'{Col.BOLD}{attr}: {Col.BC}'
+			attr_sw = {
+				'st_mode':    f'{filemode(attr_val)}',
+				'st_size':    f'{attr_val / 1024:.3} KB',
+				'st_blocks':  f'{attr_val} * 512 B',
+				'time_ns':    f'{datetime.fromtimestamp(attr_val // 1_000_000_000).strftime("%d. %b %Y %H:%M")}'
+			}
+			if attr in attr_sw:
+				attr_str += attr_sw[attr]
+			elif 'time_ns' in attr:
+				attr_str += attr_sw['time_ns']
+			else:
+				attr_str += f'{attr_val}'
+			print(f'{attr_str}{Col.END}')
 
 	def copyRecentFilesIntoCache(self, transfer_q: MaxPrioQueue):
-		print(f'{col.B}Transfering files...{col.END}')
-		while not transfer_q.empty() and not self.disk_isFilledBy(self.cacheFill):
+		print(f'{Col.B}Transfering files...{Col.END}')
+		while not transfer_q.empty() and not self.disk.isFull(use_threshold=True):
 			timestamp, (inode, size) = transfer_q.pop_nowait()
-			src = self._inode_path_map[inode]
-			dest = src.replace(self.sourceDir, self.cacheDir)
-			if self.disk_canStore(src):
+			path = self._inode_path_map[inode]
+			if self.disk.canStore(path):
 				# TODO: might add a progress bar on the bottom side of the terminal
-				#		[....C....] currentFileIndex / totalFilesToProcess like pacman
+				# 		[....C....] currentFileIndex / totalFilesToProcess like pacman
+				dest = self.disk.copyIntoCacheDir(path)
 				print(f'{datetime.fromtimestamp(timestamp).strftime("%d. %b %Y %H:%M")},'
-					  f'({inode}, {size}) -> {col.BY}{dest}{col.END}')
-				self.copyIntoCacheDir(src, dest)
+					  f'({inode}, {size}) -> {Col.BY}{dest}{Col.END}')
 			else:
 				print(f'{datetime.fromtimestamp(timestamp).strftime("%d. %b %Y %H:%M")},'
-					  f'({inode}, {size}) -> {col.BR}nowhere cache is too FULL{col.END}')
+					  f'({inode}, {size}) -> {Col.BR}nowhere cache is too FULL{Col.END}')
 				continue
 
-		percent_full = f'{col.BY}{self.diskUsagePercent:.10f} %{col.END}{col.BW}'
-		used_cache_size = f'{col.BY}{(self.current_CacheSize / 1024 / 1024):.2f} MB{col.BW}'
-		max_cache_size = f'{col.BY}{(self.max_cacheSize / 1024 / 1024)} MB {col.BW}'
-		copy_summary = \
-			f'{col.BOLD}Finished transfering. ' \
-			f'Cache is now {percent_full} full' \
-			f' (used: {used_cache_size} / {max_cache_size}){col.END}'
-		print(copy_summary)
+		# print summary
+		diskUsage, usedCacheMB, maxCacheMB = self.disk.getCurrentStatus()
+		diskUsage = Col.by(f'{diskUsage:.10f} %')
+		usedCacheMB = Col.by(f'{Col.BY}{usedCacheMB:.2f} MB')
+		maxCacheMB = Col.by(f'{maxCacheMB} MB ')
+		copySummary = \
+			Col.bw(f'Finished transfering.\nCache is now {diskUsage}') + Col.bw('full') + \
+			Col.bw(f" (used: {usedCacheMB}") + Col.bw(f" / {maxCacheMB}") + Col.bw(")")
+		print(copySummary)
 
 	def _inode_to_path(self, inode):
 		"""
@@ -243,7 +151,7 @@ class HSMCacheFS(pyfuse3.Operations):
 			return val
 		else:
 			# if not self.remote.isMounted():
-			#	self.remote.mountRemoteFS()
+			# self.remote.mountRemoteFS()
 			try:
 				val = self._inode_path_map[inode]
 			except KeyError:
@@ -252,7 +160,7 @@ class HSMCacheFS(pyfuse3.Operations):
 		if isinstance(val, set):
 			# In case of hardlinks, pick any path
 			val = next(iter(val))
-		log.debug(col.BG + '_inode_to_path: %d -> %s' + col.END, inode, val)
+		log.debug(Col.BG + '_inode_to_path: %d -> %s' + Col.END, inode, val)
 		return val
 
 	def __inode_to_path_from_cache(self, inode):
@@ -265,13 +173,13 @@ class HSMCacheFS(pyfuse3.Operations):
 
 	def _add_path(self, inode, path, fromPopulate=False):
 		if fromPopulate:
-			print(f'{col.BC}_add_path: {col.BY} {inode} -> {path}{col.END}')
+			print(f'{Col.BC}_add_path: {Col.BY} {inode} -> {path}{Col.END}')
 		# log.debug('_add_path for %d, %s', inode, path)
 		self._lookup_cnt[inode] += 1
 
 		# With hardlinks, one inode may map to multiple paths.
 		if inode not in self._inode_path_map:
-			self._inode_path_cache[inode] = path.replace(self.sourceDir, self.cacheDir)
+			self._inode_path_cache[inode] = path
 			self._inode_path_map[inode] = path
 			return
 
@@ -309,7 +217,7 @@ class HSMCacheFS(pyfuse3.Operations):
 	async def lookup(self, inode_p, name, ctx=None):
 		name = fsdecode(name)
 		# print((col.BOLD + col.RED + 'lookup for %s in %d' + col.END).format(name, inode_p))
-		log.debug((col.BOLD + col.RED + 'lookup for %s in %d' + col.END).format(name, inode_p))
+		log.debug((Col.BOLD + Col.RED + 'lookup for %s in %d' + Col.END).format(name, inode_p))
 		return await self.__lookup(inode_p, name, ctx)
 
 	# attr methods
@@ -411,7 +319,9 @@ class HSMCacheFS(pyfuse3.Operations):
 	# directory methods
 	# =================
 
-	# make inode:
+	# create special or ordinary file
+	# mostly used for fifo / pipes but nowadays mkfifo would be better suited for that
+	# mostly rare use cases
 	async def mknod(self, inode_p, name, mode, rdev, ctx):
 		path = os.path.join(self._inode_to_path(inode_p), fsdecode(name))
 		try:
@@ -493,8 +403,8 @@ class HSMCacheFS(pyfuse3.Operations):
 		log.debug('reading %s', path)
 
 		# convert to cache_path
-		cache_path = path.replace(self.sourceDir, self.cacheDir)
-		log.debug(col.BG + 'cache_path: %s, mount_path: %s' + col.END, cache_path, path)
+		cache_path = path.replace(self.disk.sourceDir, self.disk.cacheDir)
+		log.debug(Col.by(f'cache_path: {cache_path}, mount_path: {path}'))
 
 		# check cache
 		if False:
@@ -643,7 +553,7 @@ class HSMCacheFS(pyfuse3.Operations):
 		self._inode_fd_map[attr.st_ino] = fd
 		self._fd_inode_map[fd] = attr.st_ino
 		self._fd_open_count[fd] = 1
-		return (pyfuse3.FileInfo(fh=fd), attr)
+		return pyfuse3.FileInfo(fh=fd), attr
 
 	async def read(self, fd, offset, length):
 		os.lseek(fd, offset, os.SEEK_SET)
