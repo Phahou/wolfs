@@ -20,7 +20,7 @@ faulthandler.enable()
 
 log = logging.getLogger(__name__)
 from IPython import embed
-from util import Col, MaxPrioQueue
+from util import formatByteSize, Col, MaxPrioQueue
 from disk import Disk
 
 
@@ -40,7 +40,7 @@ class HSMCacheFS(pyfuse3.Operations):
 		# self.metadb = metadb
 		# self.log = logFile
 		# self.remote = node
-		self.disk = Disk(sourceDir, cacheDir, maxCacheSizeMB)
+		self.disk = Disk(log, sourceDir, cacheDir, maxCacheSizeMB)
 
 		# inode related:
 		self._inode_path_map = {pyfuse3.ROOT_INODE: sourceDir}
@@ -96,21 +96,21 @@ class HSMCacheFS(pyfuse3.Operations):
 		if sys.platform in ['bsd', 'OS X']:
 			attr_list.append('st_birthtime_ns')
 
+		attr_sw = {
+			'st_mode': lambda x: f'{filemode(x)}',
+			'st_size': lambda x: formatByteSize(x),
+			'st_blocks': lambda x: f'{x} * 512 B',
+			'time_ns': lambda x: f'{datetime.fromtimestamp(x // 1_000_000_000).strftime("%d. %b %Y %H:%M")}'
+		}
 		for attr in attr_list:
 			# TODO: make tabular
 			#   probably easy with just printing the it like ls -l
 			attr_val = getattr(entry, attr)
 			attr_str = f'{Col.BOLD}{attr}: {Col.BC}'
-			attr_sw = {
-				'st_mode':    f'{filemode(attr_val)}',
-				'st_size':    f'{attr_val / 1024:.3} KB',
-				'st_blocks':  f'{attr_val} * 512 B',
-				'time_ns':    f'{datetime.fromtimestamp(attr_val // 1_000_000_000).strftime("%d. %b %Y %H:%M")}'
-			}
 			if attr in attr_sw:
-				attr_str += attr_sw[attr]
+				attr_str += attr_sw[attr](attr_val)
 			elif 'time_ns' in attr:
-				attr_str += attr_sw['time_ns']
+				attr_str += attr_sw['time_ns'](attr_val)
 			else:
 				attr_str += f'{attr_val}'
 			print(f'{attr_str}{Col.END}')
@@ -132,13 +132,13 @@ class HSMCacheFS(pyfuse3.Operations):
 				continue
 
 		# print summary
-		diskUsage, usedCacheMB, maxCacheMB = self.disk.getCurrentStatus()
-		diskUsage = Col.by(f'{diskUsage:.10f} %')
-		usedCacheMB = Col.by(f'{Col.BY}{usedCacheMB:.2f} MB')
-		maxCacheMB = Col.by(f'{maxCacheMB} MB ')
+		diskUsage, usedCache, maxCache = self.disk.getCurrentStatus()
+		diskUsage = Col.by(f'{diskUsage:.8f}%')
+		usedCache = Col.by(f'{Col.BY}{formatByteSize(usedCache)} ')
+		maxCache = Col.by(f'{formatByteSize(maxCache)} ')
 		copySummary = \
-			Col.bw(f'Finished transfering.\nCache is now {diskUsage}') + Col.bw('full') + \
-			Col.bw(f" (used: {usedCacheMB}") + Col.bw(f" / {maxCacheMB}") + Col.bw(")")
+			Col.bw(f'Finished transfering.\nCache is now {diskUsage} ') + Col.bw('full') + \
+			Col.bw(f" (used: {usedCache}") + Col.bw(f" / {maxCache}") + Col.bw(")")
 		print(copySummary)
 
 	def _inode_to_path(self, inode):
@@ -370,6 +370,7 @@ class HSMCacheFS(pyfuse3.Operations):
 		return stat_
 
 	async def opendir(self, inode, ctx):
+		# ctx contains gid, uid, pid and umask
 		return inode
 
 	async def __readdir(self, path, off, token):
@@ -403,7 +404,7 @@ class HSMCacheFS(pyfuse3.Operations):
 		log.debug('reading %s', path)
 
 		# convert to cache_path
-		cache_path = path.replace(self.disk.sourceDir, self.disk.cacheDir)
+		cache_path = path.replace(self.disk.sourceDir.__str__(), self.disk.cacheDir.__str__() )
 		log.debug(Col.by(f'cache_path: {cache_path}, mount_path: {path}'))
 
 		# check cache
@@ -506,7 +507,6 @@ class HSMCacheFS(pyfuse3.Operations):
 
 	# File methods
 	# ============
-
 	async def open(self, inode, flags, ctx):
 		if inode in self._inode_fd_map:
 			fd = self._inode_fd_map[inode]

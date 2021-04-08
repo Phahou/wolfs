@@ -1,6 +1,16 @@
 #!/usr/bin/python
 from queue import PriorityQueue
 
+
+def formatByteSize(b):
+	j, sizes = 0, ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+	while True:
+		if b / 1024 > 1.0:
+			b = b / 1024
+			j += 1
+		else:
+			return f'{b:.4} {sizes[j]}'
+
 class MaxPrioQueue(PriorityQueue):
 	"""
 	A Max Heap Queue:
