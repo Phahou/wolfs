@@ -5,12 +5,13 @@ import errno
 import sys
 import os
 from util import Col
+import logging
+log = logging.getLogger(__name__)
 
 class Disk:
 	__MEGABYTE__ = 1024 * 1024
 
-	def __init__(self, logger, sourceDir: str, cacheDir: str, maxCacheSize: int, cacheThreshold=0.8):
-		self.__logger = logger
+	def __init__(self, sourceDir: str, cacheDir: str, maxCacheSize: int, cacheThreshold=0.8):
 		# fs related:
 		self.sourceDir = Path(sourceDir)
 		if not self.sourceDir.exists():
@@ -85,7 +86,7 @@ class Disk:
 				dest_p.mkdir(parents=True)
 			shutil.copy2(src_p, dest_p)
 		else:
-			self.__logger.error(f'{Col.BY} Unrecognized filetype: {src_p} -> ignoring')
+			log.error(f'{Col.BY} Unrecognized filetype: {src_p} -> ignoring')
 
 		# book-keeping of file-attributes
 		dest_p.chmod(src_p.stat().st_mode)

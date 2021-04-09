@@ -1,6 +1,7 @@
 #!/usr/bin/python
 from queue import PriorityQueue
 
+DEFAULT_CACHE_SIZE = 512
 
 def formatByteSize(b):
 	j, sizes = 0, ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
