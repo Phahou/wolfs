@@ -103,8 +103,7 @@ class VFSOps(pyfuse3.Operations):
 
 	async def lookup(self, inode_p, name, ctx=None):
 		name = fsdecode(name)
-		# print((col.BOLD + col.RED + 'lookup for %s in %d' + col.END).format(name, inode_p))
-		log.debug((Col.BOLD + Col.RED + 'lookup for %s in %d' + Col.END).format(name, inode_p))
+		log.debug((Col.BR + f'lookup for {name} in {inode_p}' + Col.END))
 		return await self.__lookup(inode_p, name, ctx)
 
 	# attr methods

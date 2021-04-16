@@ -10,7 +10,7 @@ def formatByteSize(b):
 			b = b / 1024
 			j += 1
 		else:
-			return f'{b:.4} {sizes[j]}'
+			return f'{float(b):.4} {sizes[j]}'
 
 class MaxPrioQueue(PriorityQueue):
 	"""
