@@ -35,6 +35,10 @@ class Col:
 	BOLD = '\033[1m'
 	B = BOLD
 
+	@staticmethod
+	def b(s):
+		return f'{Col.B}{s}{Col.END}'
+
 	WHITE = '\033[37m'
 	W = WHITE
 	BW = BOLD + WHITE
@@ -54,6 +58,10 @@ class Col:
 	GREEN = '\033[92m'
 	BG = BOLD + GREEN
 
+	@staticmethod
+	def bg(s):
+		return f'{Col.BY}{s}{Col.END}'
+
 	YELLOW = '\033[93m'
 	BY = BOLD + YELLOW
 
@@ -63,6 +71,10 @@ class Col:
 
 	RED = '\033[91m'
 	BR = BOLD + RED
+
+	@staticmethod
+	def br(s):
+		return f'{Col.BR}{s}{Col.END}'
 
 	UNDERLINE = '\033[4m'
 	END = '\033[0m'

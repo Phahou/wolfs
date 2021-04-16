@@ -8,10 +8,9 @@ faulthandler.enable()
 
 from stat import filemode
 from datetime import datetime
+fromtimestamp = datetime.fromtimestamp
+
 import sys
-
-
-
 from logging import getLogger
 log = getLogger(__name__)
 
@@ -44,6 +43,7 @@ class HSMCacheFS(VFSOps):
 		# fetch most recently used until cache is 80% full or no more to fetch necessary
 		self.copyRecentFilesIntoCache(transfer_q)
 
+
 	def populate_inode_maps(self):
 		"""
 		index the sourceDir filesystem tree
@@ -53,7 +53,7 @@ class HSMCacheFS(VFSOps):
 		transfer_q = MaxPrioQueue()
 		for dirpath, dirnames, filenames in os.walk(self.disk.sourceDir):
 			dir_attrs = self._getattr(path=dirpath)
-			self.print_stat(dir_attrs)
+			#self.print_stat(dir_attrs)
 
 			# atime or mtime
 			last_used = getattr(dir_attrs, self.time_attr) // 1_000_000_000
@@ -63,7 +63,7 @@ class HSMCacheFS(VFSOps):
 			for f in filenames:
 				filepath = os.path.join(dirpath, f)
 				file_attrs = self._getattr(path=filepath)
-				self.print_stat(file_attrs)
+				#self.print_stat(file_attrs)
 
 				last_used = getattr(file_attrs, self.time_attr) // 1_000_000_000
 				transfer_q.push_nowait((last_used, (file_attrs.st_ino, file_attrs.st_size)))
@@ -102,19 +102,17 @@ class HSMCacheFS(VFSOps):
 			print(f'{attr_str}{Col.END}')
 
 	def copyRecentFilesIntoCache(self, transfer_q: MaxPrioQueue):
-		print(f'{Col.B}Transfering files...{Col.END}')
+		print(Col.b('Transfering files...'))
+
+		date = lambda timestamp: fromtimestamp(timestamp).strftime("%d. %b %Y %H:%M")
 		while not transfer_q.empty() and not self.disk.isFull(use_threshold=True):
 			timestamp, (inode, size) = transfer_q.pop_nowait()
 			path = self._inode_path_map[inode]
 			if self.disk.canStore(path):
-				# TODO: might add a progress bar on the bottom side of the terminal
-				# 		[....C....] currentFileIndex / totalFilesToProcess like pacman
 				dest = self.disk.copyIntoCacheDir(path)
-				print(f'{datetime.fromtimestamp(timestamp).strftime("%d. %b %Y %H:%M")},'
-					  f'({inode}, {size}) -> {Col.BY}{dest}{Col.END}')
+				print(f'{date(timestamp)},({inode}, {formatByteSize(size)}) -> {Col.by(dest)}')
 			else:
-				print(f'{datetime.fromtimestamp(timestamp).strftime("%d. %b %Y %H:%M")},'
-					  f'({inode}, {size}) -> {Col.BR}nowhere cache is too FULL{Col.END}')
+				print(f'{date(timestamp)},({inode}, {size}) -> {Col.br("nowhere cache is too FULL")}')
 				continue
 
 		# print summary
