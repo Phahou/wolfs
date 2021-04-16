@@ -1,4 +1,5 @@
 #!/usr/bin/python
+from IPython import embed
 from pathlib import Path
 import shutil
 import errno
@@ -6,7 +7,9 @@ import sys
 import os
 from util import Col
 import logging
+
 log = logging.getLogger(__name__)
+
 
 class Disk:
 	__MEGABYTE__ = 1024 * 1024
@@ -65,6 +68,16 @@ class Disk:
 		self.__diskUsagePercent = self.__current_CacheSize / self.__maxCacheSize
 		# log.debug(f'new CacheSize:{self.__current_CacheSize}')
 		# log.debug(f'{self.__diskUsagePercent} full')
+		return
+
+	@staticmethod
+	def cpdir(src: Path, dst: Path):
+		if not dst.exists():
+			if not dst.parent.exists():
+				Disk.cpdir(src.parent, dst.parent)
+			mode = os.stat(src).st_mode
+			dst.mkdir(mode=mode, parents=False)
+		shutil.copystat(src, dst)
 
 	def copyIntoCacheDir(self, path: str) -> Path:
 		"""
@@ -77,19 +90,21 @@ class Disk:
 		"""
 		dest = path.replace(self.sourceDir.__str__(), self.cacheDir.__str__())
 		src_p, dest_p = Path(path), Path(dest)
+		src_mode = os.stat(src_p).st_mode
 
 		if src_p.is_dir():
-			if not dest_p.exists():
-				dest_p.mkdir(parents=True)
+			self.cpdir(src_p, dest_p)
 		elif src_p.is_file():
 			if not dest_p.parent.exists():
-				dest_p.mkdir(parents=True)
+				self.cpdir(src_p.parent, dest_p.parent)
 			shutil.copy2(src_p, dest_p)
 		else:
-			log.error(f'{Col.BY} Unrecognized filetype: {src_p} -> ignoring')
+			msg = Col.by(f' Unrecognized filetype: {src_p} -> ignoring')
+			log.error(msg)
+			raise IOError(msg)
 
-		# book-keeping of file-attributes
-		dest_p.chmod(src_p.stat().st_mode)
+		# book-keeping of file-attributes (also takes care of parent dirs having wrong modes from previous runs)
+		dest_p.chmod(src_mode)
 		shutil.copystat(src_p, dest_p)
 		self.__updateCacheSize()
 		return dest_p

@@ -1,1 +1,1 @@
-./src/hsm-cachefs /mnt/sshfs_lm/Bilder/ mnt/mountpoint ./mnt/local_data/  '' ''
+./src/hsm-cachefs $HOME/Bilder/ mnt/mountpoint ./mnt/local_data/  '' ''
