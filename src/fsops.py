@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
+
+# suppress 'unused' warnings
+from IPython import embed
+
+embed = embed
+
 import os
-
 import remote
-
 import faulthandler
+
 faulthandler.enable()
 
 from stat import filemode
 from datetime import datetime
-fromtimestamp = datetime.fromtimestamp
 
+fromtimestamp = datetime.fromtimestamp
+from pathlib import Path
 import sys
 from logging import getLogger
 log = getLogger(__name__)
 
-from IPython import embed
 from util import formatByteSize, Col, MaxPrioQueue, mute_unused
 from vfsops import VFSOps
 from vfs import FileInfo
@@ -25,8 +30,8 @@ class HSMCacheFS(VFSOps):
 	enable_acl = True
 
 	def __init__(self, node: remote.RemoteNode, sourceDir: str, cacheDir: str,
-				 metadb=None, logFile=None, noatime=True, maxCacheSizeMB=VFSOps._DEFAULT_CACHE_SIZE ):
-		super().__init__(sourceDir, cacheDir, maxCacheSizeMB)
+				 metadb=None, logFile=None, noatime=True, maxCacheSizeMB=VFSOps._DEFAULT_CACHE_SIZE):
+		super().__init__(Path(sourceDir), Path(cacheDir), maxCacheSizeMB)
 		mute_unused(node, remote, metadb, logFile)
 		# unused for now:
 		# self.metadb = metadb
@@ -40,7 +45,6 @@ class HSMCacheFS(VFSOps):
 
 		# fetch most recently used until cache is 80% full or no more to fetch necessary
 		self.copyRecentFilesIntoCache(transfer_q)
-
 
 	def populate_inode_maps(self):
 		"""

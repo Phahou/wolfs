@@ -1,20 +1,23 @@
 #!/usr/bin/python
 
+# suppress 'unused' warnings
+from IPython import embed
+
+embed = embed
+
 import os
 import pyfuse3
 import errno
-from IPython import embed
 import stat as stat_m
 from pyfuse3 import FUSEError
 from os import fsencode, fsdecode
 from collections import defaultdict
 from disk import Disk
-from util import Col
+from util import Col, formatByteSize
 import logging
 from vfs import VFS, FileInfo
-
+from pathlib import Path
 log = logging.getLogger(__name__)
-from disk import CachePath
 import sys
 
 
@@ -25,8 +28,9 @@ import sys
 class VFSOps(pyfuse3.Operations):
 	_DEFAULT_CACHE_SIZE = 512
 
-	def __init__(self, sourceDir: str, cacheDir: str, maxCacheSizeMB=_DEFAULT_CACHE_SIZE):
+	def __init__(self, sourceDir: Path, cacheDir: Path, maxCacheSizeMB=_DEFAULT_CACHE_SIZE):
 		super().__init__()
+		sourceDir, cacheDir = Path(sourceDir), Path(cacheDir)
 		self.disk = Disk(sourceDir, cacheDir, maxCacheSizeMB)
 		self.vfs = VFS(sourceDir, cacheDir)
 
@@ -85,6 +89,7 @@ class VFSOps(pyfuse3.Operations):
 	# ==================
 
 	async def statfs(self, ctx):
+		"""Easisest function to get a entrypoint into the code (not many df calls all around)"""
 		root = self._inode_path_map[pyfuse3.ROOT_INODE]
 		stat_ = pyfuse3.StatvfsData()
 		try:
@@ -95,6 +100,8 @@ class VFSOps(pyfuse3.Operations):
 					 'f_files', 'f_ffree', 'f_favail'):
 			setattr(stat_, attr, getattr(statfs, attr))
 		stat_.f_namemax = statfs.f_namemax - (len(root.__str__()) + 1)
+		s = sys.getsizeof
+		print('\n' + formatByteSize(s(self._inode_path_map) + s(self._inode_path_cache)) + '\n')
 		return stat_
 
 	async def mknod(self, inode_p, name, mode, rdev, ctx):
@@ -107,7 +114,7 @@ class VFSOps(pyfuse3.Operations):
 			os.chown(path, ctx.uid, ctx.gid)
 		except OSError as exc:
 			raise FUSEError(exc.errno)
-		attr = self._getattr(path=path)
+		attr = FileInfo.getattr(path=path)
 		self._add_path(attr.st_ino, path)
 		return attr
 
@@ -262,14 +269,14 @@ class VFSOps(pyfuse3.Operations):
 		log.debug(Col.by(f'cache_path: {cache_path}, mount_path: {path}'))
 
 		# check cache
-		if False:
-			if os.path.exists(cache_path):
-				# in cache
-				await self.__readdir(cache_path, off, token)
-			else:
-				# not in Cache
-				if self.remote.isOffline():
-					await self.remote.wakeup()
+		# if False:
+		#	if os.path.exists(cache_path):
+		#		# in cache
+		#		await self.__readdir(cache_path, off, token)
+		#	else:
+		#		# not in Cache
+		#		if self.remote.isOffline():
+		#			await self.remote.wakeup()
 		await self.__readdir(path, off, token)
 
 	async def __readdir(self, path, off, token):

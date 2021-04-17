@@ -1,7 +1,5 @@
 #!/usr/bin/python3
 from fsops import HSMCacheFS as Operations
-import fsops
-#log = fsops.log
 
 from argparse import ArgumentParser
 import logging
@@ -25,12 +23,9 @@ def init_logging(debug=False):
         root_logger.setLevel(logging.INFO)
     root_logger.addHandler(handler)
 
-def init_db(debug=False):
-    pass
-
 
 def parse_args(args):
-    '''Parse command line'''
+    """Parse command line"""
 
     parser = ArgumentParser()
 

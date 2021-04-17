@@ -1,7 +1,15 @@
 #!/usr/bin/python
 from queue import PriorityQueue
 
+import sys
+import traceback
+
 DEFAULT_CACHE_SIZE = 512
+
+
+def _exit(s: str):
+	traceback.print_tb()
+	sys.exit(s)
 
 
 def is_type(type_class, variable_list):

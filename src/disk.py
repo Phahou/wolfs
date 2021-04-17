@@ -1,11 +1,16 @@
 #!/usr/bin/python
+
+# suppress 'unused' warnings
 from IPython import embed
+
+embed = embed
+
 from pathlib import Path
 import shutil
 import errno
 import sys
 import os
-from util import Col, is_type
+from util import Col
 import logging
 
 log = logging.getLogger(__name__)
@@ -24,7 +29,7 @@ class CachePath(Path):
 class Disk:
 	__MEGABYTE__ = 1024 * 1024
 
-	def __init__(self, sourceDir: str, cacheDir: str, maxCacheSize: int, cacheThreshold=0.8):
+	def __init__(self, sourceDir: Path, cacheDir: Path, maxCacheSize: int, cacheThreshold=0.8):
 		# fs related:
 		self.sourceDir = Path(sourceDir)
 		if not self.sourceDir.exists():
