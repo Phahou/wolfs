@@ -15,11 +15,9 @@ from logging import getLogger
 log = getLogger(__name__)
 
 from IPython import embed
-from util import formatByteSize, Col, MaxPrioQueue
+from util import formatByteSize, Col, MaxPrioQueue, mute_unused
 from vfsops import VFSOps
-
-def mute_unused(*args, **kwargs):
-	return args, kwargs
+from vfsops import FileInfo
 
 
 class HSMCacheFS(VFSOps):
@@ -52,8 +50,8 @@ class HSMCacheFS(VFSOps):
 		"""
 		transfer_q = MaxPrioQueue()
 		for dirpath, dirnames, filenames in os.walk(self.disk.sourceDir):
-			dir_attrs = self._getattr(path=dirpath)
-			#self.print_stat(dir_attrs)
+			dir_attrs = FileInfo.getattr(path=dirpath)
+			# self.print_stat(dir_attrs)
 
 			# atime or mtime
 			last_used = getattr(dir_attrs, self.time_attr) // 1_000_000_000
@@ -62,8 +60,8 @@ class HSMCacheFS(VFSOps):
 
 			for f in filenames:
 				filepath = os.path.join(dirpath, f)
-				file_attrs = self._getattr(path=filepath)
-				#self.print_stat(file_attrs)
+				file_attrs = FileInfo.getattr(path=filepath)
+				# self.print_stat(file_attrs)
 
 				last_used = getattr(file_attrs, self.time_attr) // 1_000_000_000
 				transfer_q.push_nowait((last_used, (file_attrs.st_ino, file_attrs.st_size)))

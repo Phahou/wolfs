@@ -5,10 +5,20 @@ import shutil
 import errno
 import sys
 import os
-from util import Col
+from util import Col, is_type
 import logging
 
 log = logging.getLogger(__name__)
+
+
+class CachePath(Path):
+	@staticmethod
+	def toSrcPath(sourceDir, cacheDir, path) -> Path:
+		return Path(path.__str__().replace(sourceDir.__str__(), cacheDir.__str__()))
+
+	@staticmethod
+	def toCachePath(sourceDir: Path, cacheDir: Path, path: Path) -> Path:
+		return Path(path.__str__().replace(sourceDir.__str__(), cacheDir.__str__()))
 
 
 class Disk:
@@ -49,10 +59,10 @@ class Disk:
 	# ==========
 
 	def toCachePath(self, path: Path) -> Path:
-		return Path(path.__str__().replace(self.sourceDir.__str__(), self.cacheDir.__str__()))
+		return CachePath.toCachePath(self.sourceDir, self.cacheDir, path)
 
 	def toSrcPath(self, path: Path) -> Path:
-		return Path(path.__str__().replace(self.cacheDir.__str__(), self.sourceDir.__str__()))
+		return CachePath.toSrcPath(self.cacheDir, self.sourceDir, path)
 
 	@staticmethod
 	def cpdir(src: Path, dst: Path):

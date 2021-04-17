@@ -3,6 +3,15 @@ from queue import PriorityQueue
 
 DEFAULT_CACHE_SIZE = 512
 
+
+def is_type(type_class, variable_list):
+	return all([isinstance(x, type_class) for x in variable_list])
+
+
+def mute_unused(*args, **kwargs):
+	return args, kwargs
+
+
 def formatByteSize(b):
 	j, sizes = 0, ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
 	while True:
