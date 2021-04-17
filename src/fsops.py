@@ -17,7 +17,7 @@ log = getLogger(__name__)
 from IPython import embed
 from util import formatByteSize, Col, MaxPrioQueue, mute_unused
 from vfsops import VFSOps
-from vfsops import FileInfo
+from vfs import FileInfo
 
 
 class HSMCacheFS(VFSOps):
