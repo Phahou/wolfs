@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 class CachePath(Path):
 	@staticmethod
 	def toSrcPath(sourceDir, cacheDir, path) -> Path:
-		return Path(path.__str__().replace(sourceDir.__str__(), cacheDir.__str__()))
+		return Path(path.__str__().replace(cacheDir.__str__(), sourceDir.__str__()))
 
 	@staticmethod
 	def toCachePath(sourceDir: Path, cacheDir: Path, path: Path) -> Path:

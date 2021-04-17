@@ -1,5 +1,9 @@
 #!/usr/bin/python
+
+# suppress 'unused' warnings
 from IPython import embed
+
+embed = embed
 
 import os
 import pyfuse3
@@ -13,21 +17,22 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 from disk import CachePath
-import sys
-
+from util import is_type
 
 class FileInfo:
 	# this class should hold any file system information like
 	# inode, name, path, attributes
-	def __init__(self, path: Path, entry=pyfuse3.EntryAttributes(), runstat=False):
-		self.path = Path(path)
+	def __init__(self, src: Path, cache: Path, entry=pyfuse3.EntryAttributes(), runstat=False):
+		self.src = Path(src)
+		self.cache = Path(cache)
+		self.inCacheDir = False
 		if runstat:
-			self.entry = FileInfo.getattr(path)
+			self.entry = FileInfo.getattr(src)
 		else:
 			self.entry = entry
 
 	def toCacheInfo(self, path: Path):
-		return FileInfo(path, self.entry, False)
+		return FileInfo(path, path, self.entry, False)
 
 	def updateEntry(self, path=None, fd=None, entry=None):
 		self.entry = entry if entry else FileInfo.getattr(path, fd)
@@ -61,28 +66,37 @@ class FileInfo:
 
 ########################################################################################################################
 
+# TODO: fill this and use this in VFSOps
+
 class VFS:
 	# I need to save all os operations in this so if a os.lstat is called I can pretend I actually know the stuff
 	def __init__(self, sourceDir: Path, cacheDir: Path):
-		srcInfo = FileInfo(sourceDir, runstat=True)
+		# TODO: combine _inode_path_map and _inode_path_cache
+		# why?: It would half the RAM usage on 1_000_000 files from ~300 MB to ~150MB
+		# the cost: the copy of EntryAttributes should be free, as for the paths it doesnt make sense
+		#           as they would have to be replaced with a cache prefix every write or so and the gc has to keep track of all these tmp references
+		#           compromise would be a btree or mini db on disk something like a metafile right
+		#           the btree approach would really not cost more than reading the FileInfo directly as both are probably on disk (if not still loaded in ram)
+		# =>
+		#   1. combine into one dict
+		#   2. save src and cache Paths
+		#   3. replace new functionality with old one (here)
+		#   4. replace internal calls with this classes calls to inode functions in VFSOps
+
+		srcInfo = FileInfo(Path(sourceDir), Path(cacheDir), runstat=True)
 		self._inode_path_map = {pyfuse3.ROOT_INODE: srcInfo}
-		self._inode_path_cache = {pyfuse3.ROOT_INODE: srcInfo.toCacheInfo(cacheDir)}
 		self._lookup_cnt = defaultdict(lambda: 0)
 		self._fd_inode_map = dict()
 		self._inode_fd_map = dict()
 		self._fd_open_count = dict()
 		self._entry = dict()
 
-	def __contains__(self, item):
-		raise ValueError('Noo dont use "in" with this Class. Use inCache or inRemote')
-
 	# for better readability
+	# def inCache(self, item):
+	#	return item in self._inode_path_cache
 
-	def inCache(self, item):
-		return item in self._inode_path_cache
-
-	def inRemote(self, item):
-		return item in self._inode_path_map
+	# def inRemote(self, item):
+	#	return item in self._inode_path_map
 
 	def already_open(self, inode):
 		return inode in self._inode_fd_map
@@ -99,7 +113,7 @@ class VFS:
 		# check cache if not in cache raise error as we indexed everything from sourceDir in __init__
 		# availability is a different matter we simply check if the file exists at all or not
 		try:
-			val = self._inode_path_cache[inode].path
+			val = self._inode_path_map[inode].cache
 		except KeyError:
 			raise FUSEError(errno.ENOENT)  # no such file or directory
 
@@ -116,17 +130,20 @@ class VFS:
 		self._lookup_cnt[inode] += 1
 
 		# With hardlinks, one inode may map to multiple paths.
+		src_p, cache_p = CachePath.toSrcPath(path), CachePath.toCachePath(path)
 		if inode not in self._inode_path_map:
-			self._inode_path_cache[inode] = FileInfo(CachePath.toCachePath(path))
-			self._inode_path_map[inode] = FileInfo(CachePath.toSrcPath(path))
+			self._inode_path_map[inode] = FileInfo(src_p, cache_p)
 			return
 
 		# generate hardlink from path as inode is already in map
-		val = self._inode_path_map[inode].path
-		if isinstance(val, set):
-			val.add(path)
-		elif val != path:
-			self._inode_path_map[inode].path = {path, val}
+		# as we need to generate it it must be fetched from source
+		info = self._inode_path_map[inode]
+		if is_type(set, [info.src, info.cache]):
+			info.src.add(src_p)
+			info.cache.add(cache_p)
+		elif info.src != src_p and info.cache != cache_p:
+			self._inode_path_map[inode].src = {src_p, info.src}
+			self._inode_path_map[inode].cache = {path, info.cache}
 
 	# ============
 	# attr methods
