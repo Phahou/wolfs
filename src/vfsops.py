@@ -8,18 +8,14 @@ embed = embed
 import os
 import pyfuse3
 import errno
-import stat as stat_m
 from pyfuse3 import FUSEError
 from os import fsencode, fsdecode
-from collections import defaultdict
 from disk import Disk
-from util import Col, formatByteSize
+from util import Col
 import logging
 from vfs import VFS, FileInfo
 from pathlib import Path
 log = logging.getLogger(__name__)
-import sys
-
 
 # ======================================================================================================================
 # VFSOps
@@ -33,64 +29,22 @@ class VFSOps(pyfuse3.Operations):
 		sourceDir, cacheDir = Path(sourceDir), Path(cacheDir)
 		self.disk = Disk(sourceDir, cacheDir, maxCacheSizeMB)
 		self.vfs = VFS(sourceDir, cacheDir)
-
-		# inode related:
-		self._inode_path_map = {pyfuse3.ROOT_INODE: self.disk.sourceDir}
-		self._inode_path_cache = {pyfuse3.ROOT_INODE: self.disk.cacheDir}
-		self._lookup_cnt = defaultdict(lambda: 0)
-		self._fd_inode_map = dict()
-		self._inode_fd_map = dict()
-		self._fd_open_count = dict()
-
-	# for better readability
-	def already_open(self, inode):
-		return inode in self._inode_fd_map
+		self.embed_active = False
 
 	# inode handling
-	# inode to path
 	def _inode_to_path(self, inode):
-		"""
-		simply maps inodes to paths
-		raises errno.ENOENT if not in map -> no such file or directory
-		"""
-		# check cache if not in cache raise error as we indexed everything from sourceDir in __init__
-		# availability is a different matter we simply check if the file exists at all or not
-		try:
-			val = self._inode_path_cache[inode]
-		except KeyError:
-			raise FUSEError(errno.ENOENT)  # no such file or directory
-
-		if isinstance(val, set):
-			# In case of hardlinks, pick any path
-			val = next(iter(val))
-		log.debug(Col.bg(f'_inode_to_path: {inode} -> {val}'))
-		return val
+		return self.vfs.inode_to_path(inode)
 
 	def _add_path(self, inode, path, fromPopulate=False):
-		if fromPopulate:
-			print(f'{Col.BC}_add_path: {Col.by(f"{inode} -> {path}")}')
-		# log.debug('_add_path for %d, %s', inode, path)
-		self._lookup_cnt[inode] += 1
-
-		# With hardlinks, one inode may map to multiple paths.
-		if inode not in self._inode_path_map:
-			self._inode_path_cache[inode] = self.disk.toCachePath(path)
-			self._inode_path_map[inode] = self.disk.toSrcPath(path)
-			return
-
-		# generate hardlink from path as inode is already in map
-		val = self._inode_path_map[inode]
-		if isinstance(val, set):
-			val.add(path)
-		elif val != path:
-			self._inode_path_map[inode] = {path, val}
+		return self.vfs.add_path(inode, path)
 
 	# special fs methods
 	# ==================
 
 	async def statfs(self, ctx):
 		"""Easisest function to get a entrypoint into the code (not many df calls all around)"""
-		root = self._inode_path_map[pyfuse3.ROOT_INODE]
+		self.embed_active = not self.embed_active
+		root = self.vfs.inode_to_path(pyfuse3.ROOT_INODE)
 		stat_ = pyfuse3.StatvfsData()
 		try:
 			statfs = os.statvfs(root)
@@ -100,8 +54,8 @@ class VFSOps(pyfuse3.Operations):
 					 'f_files', 'f_ffree', 'f_favail'):
 			setattr(stat_, attr, getattr(statfs, attr))
 		stat_.f_namemax = statfs.f_namemax - (len(root.__str__()) + 1)
-		s = sys.getsizeof
-		print('\n' + formatByteSize(s(self._inode_path_map) + s(self._inode_path_cache)) + '\n')
+		print(Col.bg(f'RAM-Usage: of _inode_path_map: {self.vfs.getRamUsage()} | ' +
+					 f'elements: {str(len(self.vfs._inode_path_map))}'))
 		return stat_
 
 	async def mknod(self, inode_p, name, mode, rdev, ctx):
@@ -123,27 +77,17 @@ class VFSOps(pyfuse3.Operations):
 
 	# inode functions
 	async def forget(self, inode_list):
-		for (inode, nlookup) in inode_list:
-			if self._lookup_cnt[inode] > nlookup:
-				self._lookup_cnt[inode] -= nlookup
-				continue
-			log.debug('forgetting about inode %d', inode)
-			assert inode not in self._inode_fd_map
-			del self._lookup_cnt[inode]
-			try:
-				del self._inode_path_map[inode]
-			except KeyError:  # may have been deleted
-				pass
+		return await self.vfs.forget(inode_list)
 
 	def _forget_path(self, inode, path):
 		log.debug('forget %s for %d', path, inode)
-		val = self._inode_path_map[inode]
+		val = self.vfs.inode_to_path(inode)
 		if isinstance(val, set):
 			val.remove(path)
 			if len(val) == 1:
-				self._inode_path_map[inode] = next(iter(val))
+				self.vfs.set_inode_path(inode, next(iter(val)))
 		else:
-			del self._inode_path_map[inode]
+			self.vfs.del_inode(inode)
 
 	async def lookup(self, inode_p, name, ctx=None):
 		name = fsdecode(name)
@@ -151,83 +95,25 @@ class VFSOps(pyfuse3.Operations):
 		return await self.__lookup(inode_p, name, ctx)
 
 	async def __lookup(self, inode_p, name, ctx=None):
+		attr = self.vfs._inode_path_map[inode_p].entry
+		return attr
+
 		path = os.path.join(self._inode_to_path(inode_p), name)
 		# if not self.disk.isInCache(path):
 		#	path = self.disk.toSrcPath(path)
-		attr = FileInfo.getattr(path=path)
+		# attr = FileInfo.getattr(path=path)
 		if name != '.' and name != '..':
 			self._add_path(attr.st_ino, path)
 		return attr
 
-	# attr methods
-	# ============
+	# attr methods (from vfs)
+	# =======================
 
 	async def setattr(self, inode, attr, fields, fh, ctx):
-		# We use the f* functions if possible so that we can handle
-		# a setattr() call for an inode without associated directory
-		# handle.
-		if fh is None:
-			path_or_fh = self._inode_to_path(inode)
-			truncate = os.truncate
-			chmod = os.chmod
-			chown = os.chown
-			stat = os.lstat
-		else:
-			path_or_fh = fh
-			truncate = os.ftruncate
-			chmod = os.fchmod
-			chown = os.fchown
-			stat = os.fstat
-
-		try:
-			if fields.update_size:
-				truncate(path_or_fh, attr.st_size)
-
-			if fields.update_mode:
-				# Under Linux, chmod always resolves symlinks so we should
-				# actually never get a setattr() request for a symbolic
-				# link.
-				assert not stat_m.S_ISLNK(attr.st_mode)
-				chmod(path_or_fh, stat_m.S_IMODE(attr.st_mode))
-
-			if fields.update_uid:
-				chown(path_or_fh, attr.st_uid, -1, follow_symlinks=False)
-
-			if fields.update_gid:
-				chown(path_or_fh, -1, attr.st_gid, follow_symlinks=False)
-
-			if fields.update_atime and fields.update_mtime:
-				if fh is None:
-					os.utime(path_or_fh, None, follow_symlinks=False,
-							 ns=(attr.st_atime_ns, attr.st_mtime_ns))
-				else:
-					os.utime(path_or_fh, None,
-							 ns=(attr.st_atime_ns, attr.st_mtime_ns))
-			elif fields.update_atime or fields.update_mtime:
-				# We can only set both values, so we first need to retrieve the
-				# one that we shouldn't be changing.
-				oldstat = stat(path_or_fh)
-				if not fields.update_atime:
-					attr.st_atime_ns = oldstat.st_atime_ns
-				else:
-					attr.st_mtime_ns = oldstat.st_mtime_ns
-				if fh is None:
-					os.utime(path_or_fh, None, follow_symlinks=False,
-							 ns=(attr.st_atime_ns, attr.st_mtime_ns))
-				else:
-					os.utime(path_or_fh, None,
-							 ns=(attr.st_atime_ns, attr.st_mtime_ns))
-
-		except OSError as exc:
-			raise FUSEError(exc.errno)
-
-		return await self.getattr(inode)
+		return await self.vfs.setattr(inode, attr, fields, fh, ctx)
 
 	async def getattr(self, inode, ctx=None):
-		if self.already_open(inode):  # if isOpened(inode):
-			return FileInfo.getattr(fd=self._inode_fd_map[inode])
-		else:
-			return FileInfo.getattr(path=self._inode_to_path(inode))
+		return await self.vfs.getattr(inode, ctx)
 
 	# directory methods
 	# =================
@@ -252,7 +138,7 @@ class VFSOps(pyfuse3.Operations):
 			os.rmdir(path)
 		except OSError as exc:
 			raise FUSEError(exc.errno)
-		if inode in self._lookup_cnt:
+		if self.vfs.inLookupCnt(inode):
 			self._forget_path(inode, path)
 
 	async def opendir(self, inode, ctx):
@@ -265,7 +151,8 @@ class VFSOps(pyfuse3.Operations):
 		log.debug('reading %s', path)
 
 		# convert to cache_path
-		cache_path = self.disk.toCachePath(path)
+		cache_path = path
+		# cache_path = self.disk.toCachePath(path)
 		log.debug(Col.by(f'cache_path: {cache_path}, mount_path: {path}'))
 
 		# check cache
@@ -277,15 +164,20 @@ class VFSOps(pyfuse3.Operations):
 		#		# not in Cache
 		#		if self.remote.isOffline():
 		#			await self.remote.wakeup()
-		await self.__readdir(path, off, token)
+		await self.__readdir(inode, path, off, token)
 
-	async def __readdir(self, path, off, token):
+	async def __readdir(self, inode: int, path, off, token):
 		entries = []
-		for name in os.listdir(path):
-			if name == '.' or name == '..':
-				continue
-			attr = FileInfo.getattr(path=os.path.join(path, name))
-			entries.append((attr.st_ino, name, attr))
+		# copy attributes from src Filesystem
+		getFileInfo = lambda x: self.vfs._inode_path_map[x]
+
+		# dirs may have no childs
+		if childs := getFileInfo(inode)._childs:
+			for child_inode in childs:
+				info = getFileInfo(child_inode)
+				entries.append((child_inode, info.cache.name, info.entry))
+		else:
+			entries = ()
 
 		log.debug('read %d entries, starting at %d', len(entries), off)
 
@@ -335,7 +227,7 @@ class VFSOps(pyfuse3.Operations):
 			os.unlink(path)
 		except OSError as exc:
 			raise FUSEError(exc.errno)
-		if inode in self._lookup_cnt:
+		if self.vfs.inLookupCnt(inode):
 			self._forget_path(inode, path)
 
 	async def symlink(self, inode_p, name, target, ctx):
@@ -367,35 +259,36 @@ class VFSOps(pyfuse3.Operations):
 			inode = os.lstat(path_new).st_ino
 		except OSError as exc:
 			raise FUSEError(exc.errno)
-		if inode not in self._lookup_cnt:
+		if not self.vfs.inLookupCnt(inode):
 			return
 
-		val = self._inode_path_map[inode]
+		val = self.vfs._inode_path_map[inode].src
 		if isinstance(val, set):
 			assert len(val) > 1
 			val.add(path_new)
 			val.remove(path_old)
 		else:
 			assert val == path_old
-			self._inode_path_map[inode] = path_new
+			self.vfs.set_inode_path(inode, path_new)
 
 	# utime is not func in pyfuse3
 
 	# File methods
 	# ============
+
 	async def open(self, inode, flags, ctx):
-		if self.already_open(inode):
-			fd = self._inode_fd_map[inode]
-			self._fd_open_count[fd] += 1
+		if self.vfs.already_open(inode):
+			fd = self.vfs._inode_fd_map[inode]
+			self.vfs._fd_open_count[fd] += 1
 			return pyfuse3.FileInfo(fh=fd)
 		assert flags & os.O_CREAT == 0
 		try:
 			fd = os.open(self._inode_to_path(inode), flags)
 		except OSError as exc:
 			raise FUSEError(exc.errno)
-		self._inode_fd_map[inode] = fd
-		self._fd_inode_map[fd] = inode
-		self._fd_open_count[fd] = 1
+		self.vfs._inode_fd_map[inode] = fd
+		self.vfs._fd_open_count[inode] = inode
+		self.vfs._fd_open_count[fd] = 1
 		# internal_state = \
 		#	f"{col.BB}Internal state:{col.END}\n" \
 		#	f"_inode_path_map:    {self._inode_path_map}\n" \
@@ -426,9 +319,9 @@ class VFSOps(pyfuse3.Operations):
 			raise FUSEError(exc.errno)
 		attr = FileInfo.getattr(fd=fd)
 		self._add_path(attr.st_ino, path)
-		self._inode_fd_map[attr.st_ino] = fd
-		self._fd_inode_map[fd] = attr.st_ino
-		self._fd_open_count[fd] = 1
+		self.vfs._inode_fd_map[attr.st_ino] = fd
+		self.vfs._fd_inode_map[fd] = attr.st_ino
+		self.vfs._fd_open_count[fd] = 1
 		return pyfuse3.FileInfo(fh=fd), attr
 
 	async def read(self, fd, offset, length):
@@ -442,14 +335,14 @@ class VFSOps(pyfuse3.Operations):
 	# trunacte is not a function in pyfuse3
 
 	async def release(self, fd):
-		if self._fd_open_count[fd] > 1:
-			self._fd_open_count[fd] -= 1
+		if self.vfs._fd_open_count[fd] > 1:
+			self.vfs._fd_open_count[fd] -= 1
 			return
 
-		del self._fd_open_count[fd]
-		inode = self._fd_inode_map[fd]
-		del self._inode_fd_map[inode]
-		del self._fd_inode_map[fd]
+		del self.vfs._fd_open_count[fd]
+		inode = self.vfs._fd_inode_map[fd]
+		del self.vfs._inode_fd_map[inode]
+		del self.vfs._fd_inode_map[fd]
 		try:
 			os.close(fd)
 		except OSError as exc:

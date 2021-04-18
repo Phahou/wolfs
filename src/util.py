@@ -12,6 +12,13 @@ def _exit(s: str):
 	sys.exit(s)
 
 
+def sizeof(obj):
+	size = sys.getsizeof(obj)
+	if isinstance(obj, dict): return size + sum(map(sizeof, obj.keys())) + sum(map(sizeof, obj.values()))
+	if isinstance(obj, (list, tuple, set, frozenset)): return size + sum(map(sizeof, obj))
+	return size
+
+
 def is_type(type_class, variable_list):
 	return all([isinstance(x, type_class) for x in variable_list])
 
@@ -77,7 +84,7 @@ class Col:
 
 	@staticmethod
 	def bg(s):
-		return f'{Col.BY}{s}{Col.END}'
+		return f'{Col.BG}{s}{Col.END}'
 
 	YELLOW = '\033[93m'
 	BY = BOLD + YELLOW

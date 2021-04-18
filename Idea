@@ -1,6 +1,7 @@
 hsm-cachefs soll:
  - LRU Caching können ( nach Dateigröße )
    -> löst Storage Management
+ - [x] FileInfo in readdir verwenden
  - [ ] Verdrängung implementieren
  - [x] Kompletten Verzeichnisbaum des eingehängten Ordners kopieren
 

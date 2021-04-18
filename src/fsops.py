@@ -41,27 +41,28 @@ class HSMCacheFS(VFSOps):
 		self.time_attr = 'st_mtime_ns' if noatime else 'st_atime_ns'  # remote has mountopt noatime set?
 
 		# initfs
-		transfer_q = self.populate_inode_maps()
+		transfer_q = self.populate_inode_maps(self.disk.sourceDir)
 
 		# fetch most recently used until cache is 80% full or no more to fetch necessary
 		self.copyRecentFilesIntoCache(transfer_q)
 
-	def populate_inode_maps(self):
+	def populate_inode_maps(self, root: str):
 		"""
 		index the sourceDir filesystem tree
+		:param root: root directory to add to filesystem to
 		:param self.time_attr decides if mtime or atime is used
 		:return: MaxPrioQueue() with most recently edited / accessed files (atime / mtime)
 		"""
 		transfer_q = MaxPrioQueue()
-		for dirpath, dirnames, filenames in os.walk(self.disk.sourceDir):
+		for dirpath, dirnames, filenames in os.walk(root):
 			dir_attrs = FileInfo.getattr(path=dirpath)
 			# self.print_stat(dir_attrs)
 
 			# atime or mtime
 			last_used = getattr(dir_attrs, self.time_attr) // 1_000_000_000
 			transfer_q.push_nowait((last_used, (dir_attrs.st_ino, dir_attrs.st_size)))
-			self._add_path(dir_attrs.st_ino, dirpath, fromPopulate=True)
 
+			child_inodes = []
 			for f in filenames:
 				filepath = os.path.join(dirpath, f)
 				file_attrs = FileInfo.getattr(path=filepath)
@@ -69,7 +70,10 @@ class HSMCacheFS(VFSOps):
 
 				last_used = getattr(file_attrs, self.time_attr) // 1_000_000_000
 				transfer_q.push_nowait((last_used, (file_attrs.st_ino, file_attrs.st_size)))
-				self._add_path(file_attrs.st_ino, filepath, fromPopulate=True)
+				self.vfs.add_path(file_attrs.st_ino, filepath, file_attrs)
+				child_inodes.append(file_attrs.st_ino)
+
+			self.vfs.add_Directory(dir_attrs.st_ino, dirpath, dir_attrs, child_inodes)
 
 		return transfer_q
 
@@ -109,7 +113,7 @@ class HSMCacheFS(VFSOps):
 		date = lambda timestamp: fromtimestamp(timestamp).strftime("%d. %b %Y %H:%M")
 		while not transfer_q.empty() and not self.disk.isFull(use_threshold=True):
 			timestamp, (inode, size) = transfer_q.pop_nowait()
-			path = self._inode_path_map[inode]
+			path = self.vfs._inode_path_map[inode].src
 			if self.disk.canStore(path):
 				dest = self.disk.copyIntoCacheDir(path)
 				print(f'{date(timestamp)},({inode}, {formatByteSize(size)}) -> {Col.by(dest)}')

@@ -67,7 +67,7 @@ class Disk:
 		return CachePath.toCachePath(self.sourceDir, self.cacheDir, path)
 
 	def toSrcPath(self, path: Path) -> Path:
-		return CachePath.toSrcPath(self.cacheDir, self.sourceDir, path)
+		return CachePath.toSrcPath(self.sourceDir, self.cacheDir, path)
 
 	@staticmethod
 	def cpdir(src: Path, dst: Path):
