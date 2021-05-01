@@ -346,9 +346,54 @@ class VFSOps(pyfuse3.Operations):
 		os.lseek(fd, offset, os.SEEK_SET)
 		return os.read(fd, length)
 
-	async def write(self, fd, offset, buf):
+	def __fsync_with_remote(self, cache: Path, flags, write_ops):
+		"""Should work with newly created files too as we are re-using the flags"""
+		remote = self.disk.toSrcPath(cache)
+		fd_cache, fd_remote = os.open(cache, flags), os.open(remote, flags)
+		for offset, buflen in write_ops:
+			os.lseek(fd_cache, offset, os.SEEK_SET)
+			os.lseek(fd_remote, offset, os.SEEK_SET)
+			buf = os.read(fd_cache, buflen)
+			os.write(fd_remote, buf)
+		os.fsync(fd_remote)
+		os.close(fd_cache), os.close(fd_remote)
+
+	async def write(self, fd, offset: int, buf: bytes):
+		"""
+		Write *buf* into *fh* at *off*
+
+		        *fh* will by an integer filehandle returned by a prior `open` or
+		        `create` call.
+
+		        This method must return the number of bytes written. However, unless the
+		        file system has been mounted with the ``direct_io`` option, the file
+		        system *must* always write *all* the provided data (i.e., return
+		        ``len(buf)``).
+		"""
+		# TODO:
+		#   - [x] mark file somewhow as dirty as we have written to it in the cache and they need to be overwritten in the backeend
+		#         is probably only a set of paths or more simpler a True / False thing in the inode_path_map
+		#         under their entry / attributes
+		#   - [ ] maybe cache the write operation(offset, actual_bytes_written) tuple
+		#         and sync them later via write ops instead of rewriting the whole file
+		#         adv: we dont need a lot of extra space (just 2 ints per dirty file) as we use the file itself but redo everything we did in the cache file
+		#         notice: we need to set the attributes to the same values as in the cache then
 		os.lseek(fd, offset, os.SEEK_SET)
-		return os.write(fd, buf)
+		# TODO: notice: keep docstring in mind esp. direct_io
+		# if errors are encountered exceptions automatically erupt (e.g. MemoryError)
+		bytes_written = os.write(fd, buf)
+
+		write_op = (offset, bytes_written)
+
+		# hint for the flush function
+		if not self.vfs._fd_dirty_map.get(fd):
+			write_history: list = self.vfs._fd_dirty_map[fd]
+			write_history.append(write_op)
+			self.vfs._fd_dirty_map[fd] = write_history
+		else:
+			self.vfs._fd_dirty_map[fd] = [write_op]
+
+		return bytes_written
 
 	# trunacte is not a function in pyfuse3
 

@@ -40,6 +40,7 @@ class VFS:
 		self._inode_fd_map = dict()
 		self._fd_open_count = dict()
 		self._entry = dict()
+		self._fd_dirty_map = dict()
 
 		# shorthands
 		self.__toCachePath = lambda x: CachePath.toCachePath(sourceDir, cacheDir, x)
