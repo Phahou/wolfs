@@ -8,9 +8,12 @@ from pathlib import Path
 import ctypes
 import ctypes.util
 import os
+# docs: https://ftp.gnu.org/old-gnu/Manuals/glibc-2.2.3/html_node/libc_629.html
 
 libc = ctypes.CDLL(ctypes.util.find_library('c'), use_errno=True)
 libc.mount.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_ulong, ctypes.c_char_p)
+libc.umount2.argtypes = (ctypes.c_char_p, ctypes.c_int)
+
 
 def mount(source, target, fs, options=''):
 	ret = libc.mount(source.encode(), target.encode(), fs.encode(), 0, options.encode())
@@ -20,6 +23,13 @@ def mount(source, target, fs, options=''):
 						 f"Error mounting {source} ({fs}) on {target} with options '{options}': {os.strerror(errno)}")
 
 
+def umount2(file, flags):
+	ret = libc.umount2(file.encode(), flags.encode())
+	if ret < 0:
+		errno = ctypes.get_errno()
+		raise MountError(errno, f"Error umounting {file}: {os.strerror(errno)}")
+
+
 class RemoteNode:
 
 	def __init__(self, source: str, mountpoint: str, remoteFS: str, mountOpts: str,
@@ -27,7 +37,7 @@ class RemoteNode:
 		assert ping_timeout > wakeuptimeout, 'RemoteNode: (ping_timeout > wakeuptimeout)!'
 		# mount specific
 		self.mountPoint = Path(mountpoint)
-		self.remoteSource = source
+		self.remoteSource = Path(source)
 		self.remoteFS = remoteFS
 		self.mountOpts = mountOpts
 
@@ -36,6 +46,14 @@ class RemoteNode:
 		self.ping_timeout = ping_timeout
 		self.mac = mac
 		self.ip = ip
+
+	def makeAvailable(self):
+		# TODO: check if it needs to be unmounted or it could be simply remounted
+		#       maybe use cffi as it could get the Option Flags in the mount functions
+		#       (something like the MNT_FORCE flag in the mount function)
+
+		# only mount the filesystem for now or pretend you do
+		print('pretended to made remoteFS Availaible')
 
 	def isOnline(self):
 		"""sends every 0.5s a ping to check if host is up. Returns after first received ping."""

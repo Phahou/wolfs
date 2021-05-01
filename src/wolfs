@@ -6,7 +6,10 @@ import logging
 import pyfuse3
 import trio
 import sys
+from vfsops import VFSOps
 
+DEBUG = False
+DEBUG_FUSE = False
 
 def init_logging(debug=False):
     formatter = logging.Formatter('%(asctime)s.%(msecs)03d %(threadName)s: '
@@ -36,14 +39,16 @@ def parse_args(args):
                         help='Where to mount the file system')
     parser.add_argument('cache', type=str,
                         help='Local Datastore of remote Directory')
-    parser.add_argument('metadb', type=str, default='metaInfo.db',
+    parser.add_argument('--metadb', type=str, default='metaInfo.db',
                         help='sqlite3-directory storage')
-    parser.add_argument('log', type=str, default='fileJournal.log',
+    parser.add_argument('--log', type=str, default='fileJournal.log',
                         help='Journal-file to write logs to')
-    parser.add_argument('--debug', action='store_true', default=False,
+    parser.add_argument('--debug', action='store_true', default=DEBUG,
                         help='Enable debugging output')
-    parser.add_argument('--debug-fuse', action='store_true', default=False,
+    parser.add_argument('--debug-fuse', action='store_true', default=DEBUG_FUSE,
                         help='Enable FUSE debugging output')
+    parser.add_argument('--size', type=int, default=VFSOps._DEFAULT_CACHE_SIZE,
+                        help='Size of the Cache in Megabytes')
     return parser.parse_args(args)
 
 
@@ -51,7 +56,7 @@ def main():
     options = parse_args(sys.argv[1:])
     init_logging(options.debug)
     # remote = RemoteFS()
-    operations = Operations(None, options.source, options.cache, options.metadb, options.log)
+    operations = Operations(None, options.source, options.cache, metadb=options.metadb, logFile=options.log, maxCacheSizeMB=options.size )
 
     # log.debug('Mounting...')
     fuse_options = set(pyfuse3.default_options)
