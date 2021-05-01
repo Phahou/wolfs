@@ -7,10 +7,11 @@ import pyfuse3
 import trio
 import sys
 
+
 def init_logging(debug=False):
     formatter = logging.Formatter('%(asctime)s.%(msecs)03d %(threadName)s: '
                                   '[%(name)s] %(message)s',
-                                  #datefmt="%Y-%m-%d %H:%M:%S"
+                                  # datefmt="%Y-%m-%d %H:%M:%S"
                                   datefmt="%H:%M:%S")
     handler = logging.StreamHandler()
     handler.setFormatter(formatter)
@@ -49,10 +50,10 @@ def parse_args(args):
 def main():
     options = parse_args(sys.argv[1:])
     init_logging(options.debug)
-    #remote = RemoteFS()
+    # remote = RemoteFS()
     operations = Operations(None, options.source, options.cache, options.metadb, options.log)
 
-    #log.debug('Mounting...')
+    # log.debug('Mounting...')
     fuse_options = set(pyfuse3.default_options)
     fuse_options.add('fsname=hsmcachefs')
     if options.debug_fuse:
@@ -61,10 +62,10 @@ def main():
 
     unmounted = False
     try:
-        #log.debug('Entering main loop..')
+        # log.debug('Entering main loop..')
         trio.run(pyfuse3.main)
     except KeyboardInterrupt:
-        #log.debug('Unmounting due to Ctrl+C')
+        # log.debug('Unmounting due to Ctrl+C')
         pyfuse3.close()
         unmounted = True
     except:
@@ -73,7 +74,7 @@ def main():
 
     if unmounted:
         return
-    #log.debug('Unmounting..')
+    # log.debug('Unmounting..')
     pyfuse3.close()
 
 

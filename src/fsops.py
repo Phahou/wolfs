@@ -28,8 +28,8 @@ class HSMCacheFS(VFSOps):
 
 	def __init__(self, node: remote.RemoteNode, sourceDir: str, cacheDir: str,
 				 metadb=None, logFile=None, noatime=True, maxCacheSizeMB=VFSOps._DEFAULT_CACHE_SIZE):
-		super().__init__(Path(sourceDir), Path(cacheDir), maxCacheSizeMB)
-		mute_unused(node, remote, metadb, logFile)
+		super().__init__(node, Path(sourceDir), Path(cacheDir), maxCacheSizeMB, noatime)
+		mute_unused(metadb, logFile)
 		# unused for now:
 		# self.metadb = metadb
 		# self.log = logFile
@@ -48,6 +48,11 @@ class HSMCacheFS(VFSOps):
 		:param self.time_attr decides if mtime or atime is used
 		:return: MaxPrioQueue() with most recently edited / accessed files (atime / mtime)
 		"""
+
+		def print_progress(func_str, st_ino, path):
+			if st_ino in range(1_000, 1_000_000, 1_000):
+				log.debug(f'{Col.BC}{func_str}: {Col.by(f"{Col.bg(st_ino)}-> {path}")}')
+
 		transfer_q = MaxPrioQueue()
 
 		def push_to_queue(dir_attrs):
@@ -60,6 +65,7 @@ class HSMCacheFS(VFSOps):
 
 			child_inodes = []
 			for d in dirnames:
+				# only add child inodes here the subdirs will be walked through
 				subdir_path = os.path.join(dirpath, d)
 				child_inodes.append(FileInfo.getattr(subdir_path).st_ino)
 
@@ -70,9 +76,11 @@ class HSMCacheFS(VFSOps):
 				push_to_queue(file_attrs)
 
 				self.vfs.add_path(file_attrs.st_ino, filepath, file_attrs)
+				print_progress('add_path', file_attrs.st_ino, filepath)
 				child_inodes.append(file_attrs.st_ino)
 
 			self.vfs.add_Directory(dir_attrs.st_ino, dirpath, dir_attrs, child_inodes)
+			print_progress('add_Directory', dir_attrs.st_ino, dirpath)
 
 		return transfer_q
 
@@ -89,7 +97,6 @@ class HSMCacheFS(VFSOps):
 			try:
 				dest = self.disk.cp2Cache(path)
 			except NotEnoughSpaceError:
-
 				# filter the Queue
 				purged_list = MaxPrioQueue()
 				while not transfer_q.empty():

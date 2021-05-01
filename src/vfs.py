@@ -73,7 +73,7 @@ class VFS:
 	# inode handling
 	# ==============
 
-	def inode_to_path(self, inode: int):
+	def inode_to_path(self, inode: int) -> Path:
 		"""
 		simply maps inodes to paths
 		raises errno.ENOENT if not in map -> no such file or directory
@@ -89,14 +89,12 @@ class VFS:
 		if isinstance(val, set):
 			# In case of hardlinks, pick any path
 			val = next(iter(val))
-		log.debug(Col.bg(f'_inode_to_path: {inode} -> {val}'))
-		return val
+		# log.debug(Col.bg(f'_inode_to_path: {inode} -> {val}'))
+		return Path(val)
 
 	def add_Directory(self, inode: int, path: str, entry: pyfuse3.EntryAttributes, child_inodes: [int]):
 		self._lookup_cnt[entry.st_ino] += 1
 		src_p, cache_p = self.__toSrcPath(path), self.__toCachePath(path)
-
-		log.debug(f'{Col.BC}add_Directory: {Col.by(f"{inode} -> {path}")}')
 
 		# check for bad input (Programming error)
 		if inode in child_inodes:
@@ -111,8 +109,6 @@ class VFS:
 	def add_path(self, inode: int, path: str, file_attrs=pyfuse3.EntryAttributes()):
 		self._lookup_cnt[inode] += 1
 		src_p, cache_p = self.__toSrcPath(path), self.__toCachePath(path)
-
-		log.debug(f'{Col.BC}_add_path: {Col.by(f"{inode} -> {path}")}')
 
 		# With hardlinks, one inode may map to multiple paths.
 		if inode not in self._inode_path_map:

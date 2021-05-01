@@ -1,6 +1,8 @@
 .idea
 .pytest_cache
+.folder.png
 __pycache__
 cover.png
 mnt/local_data/*
 mnt/mountpoint/*
+metaInfo.db

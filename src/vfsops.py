@@ -38,7 +38,7 @@ class VFSOps(pyfuse3.Operations):
 		self.embed_active = False
 
 	# inode handling
-	def _inode_to_path(self, inode):
+	def _inode_to_path(self, inode: int) -> Path:
 		return self.vfs.inode_to_path(inode)
 
 	def _add_path(self, inode, path, fromPopulate=False):
@@ -62,6 +62,7 @@ class VFSOps(pyfuse3.Operations):
 		stat_.f_namemax = statfs.f_namemax - (len(root.__str__()) + 1)
 		print(Col.bg(f'RAM-Usage: of _inode_path_map: {self.vfs.getRamUsage()} | ' +
 					 f'elements: {str(len(self.vfs._inode_path_map))}'))
+		self.disk.printSummary()
 		return stat_
 
 	async def mknod(self, inode_p, name, mode, rdev, ctx):
@@ -101,6 +102,8 @@ class VFSOps(pyfuse3.Operations):
 		return await self.__lookup(inode_p, name, ctx)
 
 	async def __lookup(self, inode_p, name, ctx=None):
+		# TODO: look into might cause a bug Im not sure here anymore
+		#       errno.NOENT case not implemented
 		attr = self.vfs._inode_path_map[inode_p].entry
 		return attr
 
@@ -109,6 +112,7 @@ class VFSOps(pyfuse3.Operations):
 		#	path = self.disk.toSrcPath(path)
 		# attr = FileInfo.getattr(path=path)
 		if name != '.' and name != '..':
+			# _add_path only as we need to increase lookup count
 			self._add_path(attr.st_ino, path)
 		return attr
 
@@ -152,24 +156,9 @@ class VFSOps(pyfuse3.Operations):
 		return inode
 
 	async def readdir(self, inode, off, token):
-		# convert inode to path
 		path = self._inode_to_path(inode)
 		log.debug('reading %s', path)
 
-		# convert to cache_path
-		cache_path = path
-		# cache_path = self.disk.toCachePath(path)
-		log.debug(Col.by(f'cache_path: {cache_path}, mount_path: {path}'))
-
-		# check cache
-		# if False:
-		#	if os.path.exists(cache_path):
-		#		# in cache
-		#		await self.__readdir(cache_path, off, token)
-		#	else:
-		#		# not in Cache
-		#		if self.remote.isOffline():
-		#			await self.remote.wakeup()
 		await self.__readdir(inode, path, off, token)
 
 	async def __readdir(self, inode: int, path, off, token):
@@ -292,35 +281,17 @@ class VFSOps(pyfuse3.Operations):
 			fd = os.open(self._inode_to_path(inode), flags)
 		except OSError as exc:
 			raise FUSEError(exc.errno)
+
 		self.vfs._inode_fd_map[inode] = fd
-		self.vfs._fd_open_count[inode] = inode
+		self.vfs._fd_inode_map[fd] = inode
 		self.vfs._fd_open_count[fd] = 1
-		# internal_state = \
-		#	f"{col.BB}Internal state:{col.END}\n" \
-		#	f"_inode_path_map:    {self._inode_path_map}\n" \
-		#	f"_inode_path_cache:  {self._inode_path_cache}\n" \
-		#	f"_fd_inode_map:      {self._fd_inode_map}\n" \
-		#	f"_fd_open_count:     {self._fd_open_count}\n"
 
-		# print(internal_state)
-		# print('--------------------')
-
-		# sizeof = os.sys.getsizeof
-		# total_memory_usage = sizeof(self._inode_path_map) + sizeof(self._inode_path_cache) + sizeof(self._fd_inode_map) + sizeof(self._fd_open_count)
-		# memory_usage = \
-		#	f"{col.BB}Internal state:{col.END}\n" \
-		#	f"_inode_path_map:    {sizeof(self._inode_path_map)} B\n" \
-		#	f"_inode_path_cache:  {sizeof(self._inode_path_cache)} B\n" \
-		#	f"_fd_inode_map:      {sizeof(self._fd_inode_map)} B\n" \
-		#	f"_fd_open_count:     {sizeof(self._fd_open_count)} B\n" \
-		#	f"total_memory_usage: {total_memory_usage/1024:.3f} KB"
-		# print(memory_usage)
 		return pyfuse3.FileInfo(fh=fd)
 
-	async def create(self, inode_p, name, mode, flags, ctx):
-		path = os.path.join(self._inode_to_path(inode_p), fsdecode(name))
+	async def create(self, inode_p, name: str, mode: int, flags: int, ctx):
+		path: str = os.path.join(self._inode_to_path(inode_p), fsdecode(name))
 		try:
-			fd = os.open(path, flags | os.O_CREAT | os.O_TRUNC)
+			fd: int = os.open(path, flags | os.O_CREAT | os.O_TRUNC)
 		except OSError as exc:
 			raise FUSEError(exc.errno)
 		attr = FileInfo.getattr(fd=fd)
@@ -331,7 +302,7 @@ class VFSOps(pyfuse3.Operations):
 		self.vfs._fd_open_count[fd] = 1
 		return pyfuse3.FileInfo(fh=fd), attr
 
-	async def read(self, fd, offset, length):
+	async def read(self, fd, offset: int, length: int):
 		os.lseek(fd, offset, os.SEEK_SET)
 		return os.read(fd, length)
 
@@ -355,16 +326,37 @@ class VFSOps(pyfuse3.Operations):
 		except OSError as exc:
 			raise FUSEError(exc.errno)
 
-		# extra methods
-		# =============
+	# extra methods
+	# =============
 
-		#    async def access(self, inode, mode, ctx):
-		#        raise FUSEError(errno.ENOSYS)
-		#
-		#    async def flush(self, fh):
-		#        return os.fsync(fh)
-		#
-		#    async def fsync(self, fh, datasync):
+	async def access(self, inode, mode, ctx):
+		# for permissions but eh
+		raise FUSEError(errno.ENOSYS)
+
+	#
+	async def flush(self, fh):
+		# 'the close syscall'
+		# might be interesting to look into as if we might run out of space we need to
+		# wakeup the backend for sync
+		if write_ops := self.vfs._fd_dirty_map[fh]:
+			inode: int = self.vfs._fd_inode_map[fh]
+			info: FileInfo = self.vfs._inode_path_map[inode]
+			info.write_ops = write_ops
+			self.vfs._fd_inode_map[fh] = None
+		# TODO: sync up later (timer would probably be the best choice or
+		#  		some kind of check if there is almost no space available on underlying cache disk)
+
+		# TODO: :notice: difference between flush and fsync:
+		#	    flush: data _to be written_ to disk
+		#       fsync: data _is written_ to disk
+		#	need to think about if fsync shall be used to write to backeend directly
+		#	mhm if I call fsync here it is already commited to disk
+		#   the programs above dont need to know if something is on a not accessible drive or not tbh
+		#   -> fsync it is
+		return os.fsync(fh)
+
+	async def fsync(self, fh, datasync):
+
 		#        if datasync:
 		#            return self.flush(fh)
 		#        else: #TODO: read docstring and implement
