@@ -2,7 +2,6 @@
 
 # suppress 'unused' warnings
 from IPython import embed
-
 embed = embed
 
 import os
@@ -12,9 +11,6 @@ import faulthandler
 faulthandler.enable()
 
 from stat import filemode
-from datetime import datetime
-
-fromtimestamp = datetime.fromtimestamp
 from pathlib import Path
 import sys
 from logging import getLogger
@@ -22,8 +18,9 @@ log = getLogger(__name__)
 
 from util import formatByteSize, Col, MaxPrioQueue, mute_unused
 from vfsops import VFSOps
-from vfs import FileInfo
-
+from fileInfo import FileInfo
+from errors import NotEnoughSpaceError
+import pickle
 
 class HSMCacheFS(VFSOps):
 	enable_writeback_cache = True
@@ -38,12 +35,10 @@ class HSMCacheFS(VFSOps):
 		# self.log = logFile
 		# self.remote = node
 
-		self.time_attr = 'st_mtime_ns' if noatime else 'st_atime_ns'  # remote has mountopt noatime set?
-
 		# initfs
 		transfer_q = self.populate_inode_maps(self.disk.sourceDir)
 
-		# fetch most recently used until cache is 80% full or no more to fetch necessary
+		# fetch most recently used until cache is full to defined threshold or no more to fetch necessary
 		self.copyRecentFilesIntoCache(transfer_q)
 
 	def populate_inode_maps(self, root: str):
@@ -54,22 +49,26 @@ class HSMCacheFS(VFSOps):
 		:return: MaxPrioQueue() with most recently edited / accessed files (atime / mtime)
 		"""
 		transfer_q = MaxPrioQueue()
-		for dirpath, dirnames, filenames in os.walk(root):
-			dir_attrs = FileInfo.getattr(path=dirpath)
-			# self.print_stat(dir_attrs)
 
-			# atime or mtime
-			last_used = getattr(dir_attrs, self.time_attr) // 1_000_000_000
+		def push_to_queue(dir_attrs):
+			last_used = getattr(dir_attrs, self.disk.time_attr) // self.disk.__NANOSEC_PER_SEC__
 			transfer_q.push_nowait((last_used, (dir_attrs.st_ino, dir_attrs.st_size)))
 
+		for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+			dir_attrs = FileInfo.getattr(path=dirpath)
+			push_to_queue(dir_attrs)
+
 			child_inodes = []
+			for d in dirnames:
+				subdir_path = os.path.join(dirpath, d)
+				child_inodes.append(FileInfo.getattr(subdir_path).st_ino)
+
 			for f in filenames:
 				filepath = os.path.join(dirpath, f)
-				file_attrs = FileInfo.getattr(path=filepath)
-				# self.print_stat(file_attrs)
 
-				last_used = getattr(file_attrs, self.time_attr) // 1_000_000_000
-				transfer_q.push_nowait((last_used, (file_attrs.st_ino, file_attrs.st_size)))
+				file_attrs = FileInfo.getattr(path=filepath)
+				push_to_queue(file_attrs)
+
 				self.vfs.add_path(file_attrs.st_ino, filepath, file_attrs)
 				child_inodes.append(file_attrs.st_ino)
 
@@ -77,49 +76,27 @@ class HSMCacheFS(VFSOps):
 
 		return transfer_q
 
-	def print_stat(self, entry):
-		"""print all common file attributes"""
-		attr_list = [
-			'st_ino', 'st_mode', 'st_nlink', 'st_uid', 'st_gid',
-			# 'st_rdev', # root device id is really useless tbh
-			'st_size', 'st_blocks',
-			self.time_attr, 'st_ctime_ns'
-		]
-		if sys.platform in ['bsd', 'OS X']:
-			attr_list.append('st_birthtime_ns')
-
-		attr_sw = {
-			'st_mode': lambda x: f'{filemode(x)}',
-			'st_size': lambda x: formatByteSize(x),
-			'st_blocks': lambda x: f'{x} * 512 B',
-			'time_ns': lambda x: f'{datetime.fromtimestamp(x // 1_000_000_000).strftime("%d. %b %Y %H:%M")}'
-		}
-		for attr in attr_list:
-			# TODO: make tabular
-			#   probably easy with just printing the it like ls -l
-			attr_val = getattr(entry, attr)
-			attr_str = f'{Col.BOLD}{attr}: {Col.BC}'
-			if attr in attr_sw:
-				attr_str += attr_sw[attr](attr_val)
-			elif 'time_ns' in attr:
-				attr_str += attr_sw['time_ns'](attr_val)
-			else:
-				attr_str += f'{attr_val}'
-			print(f'{attr_str}{Col.END}')
-
 	def copyRecentFilesIntoCache(self, transfer_q: MaxPrioQueue):
 		print(Col.b('Transfering files...'))
-
-		date = lambda timestamp: fromtimestamp(timestamp).strftime("%d. %b %Y %H:%M")
 		while not transfer_q.empty() and not self.disk.isFull(use_threshold=True):
-			timestamp, (inode, size) = transfer_q.pop_nowait()
+			timestamp, (inode, file_size) = transfer_q.pop_nowait()
 			path = self.vfs._inode_path_map[inode].src
-			if self.disk.canStore(path):
-				dest = self.disk.copyIntoCacheDir(path)
-				print(f'{date(timestamp)},({inode}, {formatByteSize(size)}) -> {Col.by(dest)}')
-			else:
-				print(f'{date(timestamp)},({inode}, {size}) -> {Col.br("nowhere cache is too FULL")}')
+
+			# skip symbolic links for now
+			if os.path.islink(path):
 				continue
+
+			try:
+				dest = self.disk.cp2Cache(path)
+			except NotEnoughSpaceError:
+
+				# filter the Queue
+				purged_list = MaxPrioQueue()
+				while not transfer_q.empty():
+					timestamp_i, (inode_i, size_i) = transfer_q.pop_nowait()
+					if size_i < file_size:
+						purged_list.push_nowait((timestamp_i, (inode_i, size_i)))
+				transfer_q = purged_list
 
 		# print summary
 		diskUsage, usedCache, maxCache = self.disk.getCurrentStatus()
@@ -127,6 +104,7 @@ class HSMCacheFS(VFSOps):
 		usedCache = Col.by(f'{Col.BY}{formatByteSize(usedCache)} ')
 		maxCache = Col.by(f'{formatByteSize(maxCache)} ')
 		copySummary = \
-			Col.bw(f'Finished transfering.\nCache is now {diskUsage} ') + Col.bw('full') + \
+			Col.bw(f'Finished transfering {self.disk.in_cache.qsize()} elements.\nCache is now {diskUsage} ') + Col.bw(
+				'full') + \
 			Col.bw(f" (used: {usedCache}") + Col.bw(f" / {maxCache}") + Col.bw(")")
 		print(copySummary)

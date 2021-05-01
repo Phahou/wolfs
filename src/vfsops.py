@@ -13,8 +13,11 @@ from os import fsencode, fsdecode
 from disk import Disk
 from util import Col
 import logging
-from vfs import VFS, FileInfo
+from vfs import VFS
+from src.fileInfo import FileInfo
 from pathlib import Path
+import remote
+
 log = logging.getLogger(__name__)
 
 # ======================================================================================================================
@@ -24,11 +27,14 @@ log = logging.getLogger(__name__)
 class VFSOps(pyfuse3.Operations):
 	_DEFAULT_CACHE_SIZE = 512
 
-	def __init__(self, sourceDir: Path, cacheDir: Path, maxCacheSizeMB=_DEFAULT_CACHE_SIZE):
+	def __init__(self, node: remote.RemoteNode, sourceDir: Path, cacheDir: Path, maxCacheSizeMB=_DEFAULT_CACHE_SIZE,
+				 noatime=True):
 		super().__init__()
 		sourceDir, cacheDir = Path(sourceDir), Path(cacheDir)
-		self.disk = Disk(sourceDir, cacheDir, maxCacheSizeMB)
+		self.disk = Disk(sourceDir, cacheDir, maxCacheSizeMB, noatime)
 		self.vfs = VFS(sourceDir, cacheDir)
+		self.remote = node
+
 		self.embed_active = False
 
 	# inode handling
@@ -319,6 +325,7 @@ class VFSOps(pyfuse3.Operations):
 			raise FUSEError(exc.errno)
 		attr = FileInfo.getattr(fd=fd)
 		self._add_path(attr.st_ino, path)
+		self.disk.addFile(path, attr)
 		self.vfs._inode_fd_map[attr.st_ino] = fd
 		self.vfs._fd_inode_map[fd] = attr.st_ino
 		self.vfs._fd_open_count[fd] = 1

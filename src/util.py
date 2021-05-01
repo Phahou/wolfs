@@ -3,6 +3,12 @@ from queue import PriorityQueue
 
 import sys
 import traceback
+# suppress 'unused' warnings
+from IPython import embed
+
+embed = embed
+
+from datetime import datetime
 
 DEFAULT_CACHE_SIZE = 512
 
@@ -11,6 +17,9 @@ def _exit(s: str):
 	traceback.print_tb()
 	sys.exit(s)
 
+
+def datef(timestamp):
+	return datetime.fromtimestamp(timestamp).strftime("%d.%b.%Y %H:%M")
 
 def sizeof(obj):
 	size = sys.getsizeof(obj)
