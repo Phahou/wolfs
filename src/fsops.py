@@ -14,6 +14,7 @@ from stat import filemode
 from pathlib import Path
 import sys
 from logging import getLogger
+
 log = getLogger(__name__)
 
 from util import formatByteSize, Col, MaxPrioQueue, mute_unused
@@ -21,6 +22,17 @@ from vfsops import VFSOps
 from fileInfo import FileInfo
 from errors import NotEnoughSpaceError
 import pickle
+
+
+def save_obj(obj, name):
+	with open(name, 'wb+') as f:
+		pickle.dump(obj, f, pickle.HIGHEST_PROTOCOL)
+
+
+def load_obj(name):
+	with open(name, 'rb') as f:
+		return pickle.load(f)
+
 
 class HSMCacheFS(VFSOps):
 	enable_writeback_cache = True
@@ -31,12 +43,20 @@ class HSMCacheFS(VFSOps):
 		super().__init__(node, Path(sourceDir), Path(cacheDir), maxCacheSizeMB, noatime)
 		mute_unused(metadb, logFile)
 		# unused for now:
+		if not (metadb == '' or metadb is None):
+			try:
+				self.vfs._inode_path_map = load_obj(metadb)
+				return
+			except FileNotFoundError as e:
+				pass
+
 		# self.metadb = metadb
 		# self.log = logFile
 		# self.remote = node
 
 		# initfs
 		transfer_q = self.populate_inode_maps(self.disk.sourceDir)
+		save_obj(self.vfs._inode_path_map, metadb)
 
 		# fetch most recently used until cache is full to defined threshold or no more to fetch necessary
 		self.copyRecentFilesIntoCache(transfer_q)
