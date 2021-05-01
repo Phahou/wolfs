@@ -164,12 +164,13 @@ class VFSOps(pyfuse3.Operations):
 	async def __readdir(self, inode: int, path, off, token):
 		entries = []
 		# copy attributes from src Filesystem
-		getFileInfo = lambda x: self.vfs._inode_path_map[x]
-
-		# dirs may have no childs
-		if childs := getFileInfo(inode)._childs:
+		if childs := self.vfs._inode_path_map[inode]._childs:
 			for child_inode in childs:
-				info = getFileInfo(child_inode)
+				try:
+					info = self.vfs._inode_path_map[child_inode]
+				except KeyError as exc:
+					# TODO: ignore missing symlinks for now
+					pass
 				entries.append((child_inode, info.cache.name, info.entry))
 		else:
 			entries = ()
@@ -268,17 +269,56 @@ class VFSOps(pyfuse3.Operations):
 
 	# utime is not func in pyfuse3
 
-	# File methods
-	# ============
+	# File methods (functions with file descriptors)
+	# ==============================================
 
-	async def open(self, inode, flags, ctx):
+	def __fetchFile(self, f: Path, size: int):
+		"""
+		Discards one or multiple files to make space for :f:
+		Strategry used is to discard the Least recently used files
+		:return list of discarded Paths
+		:raise pyfuse3.FUSEError
+		"""
+		print(f'__fetchFile: {f}')
+		# in case the file is bigger than the whole cache size (unlikely but possible on small sizes)
+		if not self.disk.canFit(size):
+			log.error('Tried to fetch a file larger than the cache Size Quota')
+			raise FUSEError(errno.EDQUOT)
+		elif os.path.islink(f):
+			# open syscalls are only bound to files as opendir() exists
+			raise FUSEError(errno.EISDIR)
+
+		self.disk.cp2Cache(f, force=True)
+
+	async def open(self, inode: int, flags: int, ctx):
+		# return early for already opened fd
+		print(f'open({inode}, {flags}, {ctx})')
+
 		if self.vfs.already_open(inode):
 			fd = self.vfs._inode_fd_map[inode]
 			self.vfs._fd_open_count[fd] += 1
+			print(Col.by(f'open: (fd, inode): ({fd}, {inode})'))
 			return pyfuse3.FileInfo(fh=fd)
+
+		# disable creation handling here
 		assert flags & os.O_CREAT == 0
+
 		try:
-			fd = os.open(self._inode_to_path(inode), flags)
+			f: Path = self._inode_to_path(inode)
+			info: FileInfo = self.vfs._inode_path_map[inode]
+
+			# fetch file from remote if not in cache already
+			if not f.exists():
+				f_src = self.disk.toSrcPath(f)
+				# self.remote.makeAvailable()
+				try:
+					self.__fetchFile(f_src, info.entry.st_size)
+				except FUSEError as e:
+					print('Something really bad happened')
+
+			# File is in Cache now
+			fd: int = os.open(f, flags)
+			info.updateEntry(fd=fd)
 		except OSError as exc:
 			raise FUSEError(exc.errno)
 
