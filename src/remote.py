@@ -34,7 +34,7 @@ class RemoteNode:
 
 	def __init__(self, source: str, mountpoint: str, remoteFS: str, mountOpts: str,
 				 mac: str, ip: str, ping_timeout=3.0, wakeuptimeout=45.0):
-		assert ping_timeout > wakeuptimeout, 'RemoteNode: (ping_timeout > wakeuptimeout)!'
+		assert ping_timeout < wakeuptimeout, f'RemoteNode: ({ping_timeout} > {wakeuptimeout})!'
 		# mount specific
 		self.mountPoint = Path(mountpoint)
 		self.remoteSource = Path(source)
@@ -71,7 +71,9 @@ class RemoteNode:
 
 	def isMounted(self):
 		"""checks if remote FS is accessible"""
-		return self.mountPoint.is_mount()
+		return True
+
+	# return self.mountPoint.is_mount()
 
 	async def mountRemoteFS(self):
 		"""

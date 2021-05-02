@@ -3,7 +3,7 @@
 # suppress 'unused' warnings
 from IPython import embed
 
-from src.fileInfo import FileInfo
+from fileInfo import FileInfo
 
 embed = embed
 
@@ -13,7 +13,6 @@ import errno
 import stat as stat_m
 from pyfuse3 import FUSEError
 from collections import defaultdict
-from util import Col
 from pathlib import Path
 import logging
 log = logging.getLogger(__name__)
@@ -39,8 +38,7 @@ class VFS:
 		self._fd_inode_map = dict()
 		self._inode_fd_map = dict()
 		self._fd_open_count = dict()
-		self._entry = dict()
-		self._fd_dirty_map = dict()
+		self._inode_dirty_map = dict()
 
 		# shorthands
 		self.__toCachePath = lambda x: CachePath.toCachePath(sourceDir, cacheDir, x)
@@ -50,7 +48,8 @@ class VFS:
 		child_inodes = []
 		for f in os.listdir(srcInfo.src):
 			child_inodes.append(FileInfo.getattr(srcInfo.src.joinpath(Path(f))).st_ino)
-		self.add_Directory(pyfuse3.ROOT_INODE, sourceDir, FileInfo.getattr(sourceDir), child_inodes=child_inodes)
+		self.add_Directory(pyfuse3.ROOT_INODE, sourceDir.__str__(), FileInfo.getattr(sourceDir),
+						   child_inodes=child_inodes)
 
 	def already_open(self, inode: int):
 		return inode in self._inode_fd_map
@@ -85,6 +84,7 @@ class VFS:
 			val = self._inode_path_map[inode].cache
 		except KeyError:
 			# if a file isnt existing we would have a FileInfo entry in the _inode_path_map
+			print(f"inode: {inode} has not path defined: {self._inode_path_map.get(inode)}")
 			raise FUSEError(errno.ENOENT)  # no such file or directory
 
 		if isinstance(val, set):
@@ -94,12 +94,11 @@ class VFS:
 		return Path(val)
 
 	def add_Directory(self, inode: int, path: str, entry: pyfuse3.EntryAttributes, child_inodes: [int]):
+		assert inode not in child_inodes
+		assert Path(path).is_dir()
+
 		self._lookup_cnt[entry.st_ino] += 1
 		src_p, cache_p = self.__toSrcPath(path), self.__toCachePath(path)
-
-		# check for bad input (Programming error)
-		if inode in child_inodes:
-			raise ValueError(f'parent inode in child inodes: {inode} in {child_inodes}')
 
 		directory = FileInfo(src_p, cache_p, entry, child_inodes=child_inodes)
 		self._inode_path_map[inode] = directory
@@ -115,6 +114,11 @@ class VFS:
 		if inode not in self._inode_path_map:
 			self._inode_path_map[inode] = FileInfo(src_p, cache_p, file_attrs)
 			return
+
+		# no hardlinks for directories
+		if Path(path).is_dir():
+			print(path)
+			assert not Path(path).is_dir()
 
 		# generate hardlink from path as inode is already in map
 		info = self._inode_path_map[inode]

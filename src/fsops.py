@@ -10,9 +10,7 @@ import faulthandler
 
 faulthandler.enable()
 
-from stat import filemode
 from pathlib import Path
-import sys
 from logging import getLogger
 
 log = getLogger(__name__)
@@ -43,12 +41,13 @@ class HSMCacheFS(VFSOps):
 		super().__init__(node, Path(sourceDir), Path(cacheDir), maxCacheSizeMB, noatime)
 		mute_unused(metadb, logFile)
 		# unused for now:
-		if not (metadb == '' or metadb is None):
-			try:
-				self.vfs._inode_path_map = load_obj(metadb)
-				return
-			except FileNotFoundError as e:
-				pass
+		if self.remote.isMounted():
+			transfer_q = self.populate_inode_maps(self.disk.sourceDir)
+			self.copyRecentFilesIntoCache(transfer_q)
+		else:
+			# remote is offline our best guess is to believe that the cache is up to date
+			# todo: set to poll is remote is mounted and replace metafile if so
+			self.restoreInternalState(Path(metadb))
 
 		# self.metadb = metadb
 		# self.log = logFile

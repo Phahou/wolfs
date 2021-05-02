@@ -14,7 +14,7 @@ from disk import Disk
 from util import Col
 import logging
 from vfs import VFS
-from src.fileInfo import FileInfo
+from fileInfo import FileInfo
 from pathlib import Path
 import remote
 
@@ -152,6 +152,7 @@ class VFSOps(pyfuse3.Operations):
 			self._forget_path(inode, path)
 
 	async def opendir(self, inode, ctx):
+		print(Col.by(f"opendir: {self.vfs.inode_to_path(inode)}"))
 		# ctx contains gid, uid, pid and umask
 		return inode
 
@@ -170,8 +171,8 @@ class VFSOps(pyfuse3.Operations):
 					info = self.vfs._inode_path_map[child_inode]
 				except KeyError as exc:
 					# TODO: ignore missing symlinks for now
-					pass
-				entries.append((child_inode, info.cache.name, info.entry))
+					print(f'Ignored symlink {info.cache}')
+
 		else:
 			entries = ()
 
@@ -274,10 +275,9 @@ class VFSOps(pyfuse3.Operations):
 
 	def __fetchFile(self, f: Path, size: int):
 		"""
-		Discards one or multiple files to make space for :f:
+		Discards one or multiple files to make space for `f`
 		Strategry used is to discard the Least recently used files
-		:return list of discarded Paths
-		:raise pyfuse3.FUSEError
+		:raise pyfuse3.FUSEError  with errno set to according error
 		"""
 		print(f'__fetchFile: {f}')
 		# in case the file is bigger than the whole cache size (unlikely but possible on small sizes)
@@ -288,7 +288,7 @@ class VFSOps(pyfuse3.Operations):
 			# open syscalls are only bound to files as opendir() exists
 			raise FUSEError(errno.EISDIR)
 
-		self.disk.cp2Cache(f, force=True)
+		self.disk.cp2Cache(f, force=True, open_paths=open_paths)
 
 	async def open(self, inode: int, flags: int, ctx):
 		# return early for already opened fd
@@ -311,10 +311,7 @@ class VFSOps(pyfuse3.Operations):
 			if not f.exists():
 				f_src = self.disk.toSrcPath(f)
 				# self.remote.makeAvailable()
-				try:
-					self.__fetchFile(f_src, info.entry.st_size)
-				except FUSEError as e:
-					print('Something really bad happened')
+				self.__fetchFile(f_src, info.entry.st_size)
 
 			# File is in Cache now
 			fd: int = os.open(f, flags)
@@ -451,8 +448,13 @@ class VFSOps(pyfuse3.Operations):
 		raise FUSEError(errno.ENOSYS)
 
 	async def releasedir(self, fh):
-		# os.sys.stderr.write("\x1b[2J\x1b[H")
-		raise FUSEError(errno.ENOSYS)
+		# same as normal release() no more fh are using it
+		print(Col.by(f"releasing dir: {self.vfs.inode_to_path(fh)}"))
+
+	# there is nothing really to do here
+
+	# os.sys.stderr.write("\x1b[2J\x1b[H")
+	# raise FUSEError(errno.ENOSYS)
 
 	# xattr methods
 	# =============

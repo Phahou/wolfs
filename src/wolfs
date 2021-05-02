@@ -1,11 +1,12 @@
 #!/usr/bin/python3
 from fsops import HSMCacheFS as Operations
 
-from argparse import ArgumentParser
+from argparse import ArgumentParser, RawDescriptionHelpFormatter
 import logging
 import pyfuse3
 import trio
 import sys
+from remote import RemoteNode
 from vfsops import VFSOps
 
 DEBUG = False
@@ -30,8 +31,12 @@ def init_logging(debug=False):
 
 def parse_args(args):
     """Parse command line"""
+    example_usuage = (
+        "Example Usage:\n\n"
+        "  wolfs $HOME/.local/lib mnt/mountpoint /tmp/wolfs_data/ --size 8096 --debug\n"
+    )
 
-    parser = ArgumentParser()
+    parser = ArgumentParser(epilog=example_usuage, formatter_class=RawDescriptionHelpFormatter)
 
     parser.add_argument('source', type=str,
                         help='Directory tree to mirror')
@@ -55,8 +60,9 @@ def parse_args(args):
 def main():
     options = parse_args(sys.argv[1:])
     init_logging(options.debug)
-    # remote = RemoteFS()
-    operations = Operations(None, options.source, options.cache, metadb=options.metadb, logFile=options.log, maxCacheSizeMB=options.size )
+    remote = RemoteNode(options.source, options.mountpoint, 'ext4', None, None, None)
+    operations = Operations(remote, options.source, options.cache, metadb=options.metadb, logFile=options.log,
+                            maxCacheSizeMB=options.size)
 
     # log.debug('Mounting...')
     fuse_options = set(pyfuse3.default_options)

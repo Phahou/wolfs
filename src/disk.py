@@ -15,8 +15,9 @@ import time
 import logging
 import pyfuse3
 from pyfuse3 import FUSEError
-from src.fileInfo import FileInfo
+from fileInfo import FileInfo
 from errors import NotEnoughSpaceError
+import heapq
 from queue import PriorityQueue
 
 log = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ class Disk:
 		self.__maxCacheSize = maxCacheSize * self.__MEGABYTE__
 		self.time_attr = 'st_mtime_ns' if noatime else 'st_atime_ns'  # remote has mountopt noatime set?
 		self.in_cache = PriorityQueue()
+		self.in_cache2 = []
 
 	# ===========
 	# private api
@@ -71,7 +73,7 @@ class Disk:
 
 	@staticmethod
 	def cpdir(src: Path, dst: Path):
-		"""creates a dir :dst: and all its missing parents. Copies attrs of :src: and its parents accordingly"""
+		"""creates a dir  `dst` and all its missing parents. Copies attrs of `src` and its parents accordingly"""
 		if not dst.exists():
 			if not dst.parent.exists():
 				Disk.cpdir(src.parent, dst.parent)
@@ -92,7 +94,7 @@ class Disk:
 		return total_size
 
 	def canFit(self, size: int) -> bool:
-		"""Is the cache large enough to hold :file: ?"""
+		"""Is the cache large enough to hold `size` ?"""
 		# if isinstance(file, FileInfo):
 		return size < self.__maxCacheSize
 
@@ -101,7 +103,7 @@ class Disk:
 
 	def __canStore(self, path) -> bool:
 		"""
-		Does the cache have room  for :path: ?
+		Does the cache have room  for `path` ?
 		Cache size needs to be updated if file is inserted into cacheDir.
 		:param path: returns False on symbolic links
 		"""
@@ -115,7 +117,7 @@ class Disk:
 		return store_able
 
 	def isFilledBy(self, percent: float):
-		"""percent: float needs to be between 0.0 and 1.0"""
+		""":param percent: between [0.0, 1.0]"""
 		assert 0.0 < percent < 1.0, 'disk_isFullBy: needs to be [0-1]'
 		diskUsage = self.__current_CacheSize / self.__maxCacheSize
 		return True if diskUsage >= percent else False
@@ -125,17 +127,48 @@ class Disk:
 			return self.isFilledBy(self.__cacheThreshold)
 		return self.isFilledBy(1.0)
 
+	def _pushtoHeap(self, path, force=False):
+		timestamp = time.time_ns() if force else getattr(os.stat(path), self.time_attr) // self.__NANOSEC_PER_SEC__
+		size = os.path.getsize(path)
+		# st_ino = os.stat(path).st_ino
+		heapq.heappush(self.in_cache2, (timestamp, (path, size)))
+		self.in_cache.put_nowait((timestamp, (path, size)))
+		return size
+
+	def _deleteInHeap(self, path):
+		pass
+
 	def addFile(self, path: str, attr: pyfuse3.EntryAttributes):
-		# todo: think about making a write cache for newly created files
+		# todo: think about making a write cache for newly created files -> store write_ops
 		#       check after a timeout if said files still exist or are still referenced if not
 		#       then they were tempfiles anyway otherwise sync them to the backend
 		pass
 
-	def cp2Cache(self, file: Path, force=False) -> Path:
-		""":param :force: delete files if necessary"""
-		while force and not self.__canStore(file):
-			c_timestamp, (c_src, c_size) = self.in_cache.get_nowait()
+	def cp2Cache(self, path: Path, force=False, open_paths=[]) -> Path:
+		"""
+		:param force: Delete files if necessary
+		:param path: file/dir to be copied
+		:raises NotEnoughSpaceError: If there isn't enough space to hold file and `force` wasn't set
+		:returns: Cache path of copied file/dir
+		Copy `file` and its meta-data into Cache. If `force` is set it deletes least recently used files until enough space is available.
+
+		Note:
+		  Make sure to sync the cache and remote before copying if using `force` as it could potentially delete
+		  a dirty file which has not yet been sync'd and data would be lost
+		"""
+		while force and not self.__canStore(path):
+			try:
+				c_timestamp, (c_src, c_size) = self.in_cache.get_nowait()
+			except queue.Empty:
+				log.warning(f"Deleted all non open files and still couldn't store file: {path}")
+				raise FUSEError(errno.EDQUOT)
+
+			c_timestamp2, (c_src2, c_size2) = heapq.heappop(self.in_cache2)
 			cpath: Path = Path(self.toCachePath(c_src))
+
+			# skip open files (we cant sync and close them as they might be written / read from)
+			if cpath in open_paths:
+				continue
 
 			if not cpath.exists():
 				raise FUSEError('File not in cache although it should be ?')
@@ -154,39 +187,42 @@ class Disk:
 
 			self.__current_CacheSize -= c_size
 
-		if self.__canStore(file):
-			dest = self.__cp2Cache(file)
-			self.__current_CacheSize += os.path.getsize(file)
+		if self.__canStore(path):
+			dest = self.toCachePath(path)
+			Disk._cp2Dir(path, dest)
+			self.__current_CacheSize += self._pushtoHeap(path, force)
 
 			# TODO: use xattributes later and make a custom field:
 			# sth like __wolfs_atime__ : time.time_ns()
 			#   for the last access of a file
 			# so we retain standard-conformity
-			timestamp = time.time_ns() if force else getattr(os.stat(file), self.time_attr) // self.__NANOSEC_PER_SEC__
-			size = os.path.getsize(file)
 
-			self.in_cache.put_nowait((timestamp, (file, size)))
 			return dest
 		else:
 			raise NotEnoughSpaceError('Not enough space')
 
-	def __cp2Cache(self, src: Path) -> Path:
+	@staticmethod
+	def _cp2Dir(src: Path, dst: Path):
 		"""
-		Copy into Cache and keep meta-data.
+		Create a copy of `src` in `dst` while also keeping meta-data.
 		Creates parent directories on the fly.
 		Ignores special files.
 
-		:arg src File from sourceDir to be copied into cacheDir
+		:arg src: original File
+		:arg dst: destination File to have the same attributes and contents of `src` after the call
 		:returns: Path of copied file in cacheDir
 		"""
-		dst = self.toCachePath(src)
+		if src == dst:
+			# same File no need for copying,
+			# file should exist already too as self.__canStore would throw errors otherwise
+			return src
 		src_mode = os.stat(src).st_mode
 
 		if src.is_dir():
-			self.cpdir(src, dst)
+			Disk.cpdir(src, dst)
 		elif src.is_file():
 			if not dst.parent.exists():
-				self.cpdir(src.parent, dst.parent)
+				Disk.cpdir(src.parent, dst.parent)
 			shutil.copy2(src, dst)
 		else:
 			msg = Col.by(f' Unrecognized filetype: {src} -> ignoring')
