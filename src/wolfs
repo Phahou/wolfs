@@ -8,13 +8,15 @@ import trio
 import sys
 from remote import RemoteNode
 from vfsops import VFSOps
+from util import Col
 
 DEBUG = False
 DEBUG_FUSE = False
 
 def init_logging(debug=False):
-    formatter = logging.Formatter('%(asctime)s.%(msecs)03d %(threadName)s: '
-                                  '[%(name)s] %(message)s',
+    formatter = logging.Formatter(f'%(asctime)s.%(msecs)03d [%(levelname)8s] '
+                                  #'%(threadName)'s'
+                                  f'[%(name)8s] | %(message)s {Col.END}',
                                   # datefmt="%Y-%m-%d %H:%M:%S"
                                   datefmt="%H:%M:%S")
     handler = logging.StreamHandler()
@@ -66,7 +68,7 @@ def main():
 
     # log.debug('Mounting...')
     fuse_options = set(pyfuse3.default_options)
-    fuse_options.add('fsname=hsmcachefs')
+    fuse_options.add('fsname=wolfs')
     if options.debug_fuse:
         fuse_options.add('debug')
     pyfuse3.init(operations, options.mountpoint, fuse_options)

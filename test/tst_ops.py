@@ -98,7 +98,7 @@ def test_passthroughfs(tmpdir):
     mnt_dir = str(tmpdir.mkdir('mnt'))
     src_dir = str(tmpdir.mkdir('src'))
     cmdline = [sys.executable,
-               os.path.join(basename, 'hsm-cachefs'),
+               os.path.join(basename, 'wolfs'),
                src_dir, mnt_dir ]
     mount_process = subprocess.Popen(cmdline, stdin=subprocess.DEVNULL,
                                      universal_newlines=True)

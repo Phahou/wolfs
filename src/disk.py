@@ -16,9 +16,11 @@ import logging
 import pyfuse3
 from pyfuse3 import FUSEError
 from fileInfo import FileInfo
+from util import __functionName__
 from errors import NotEnoughSpaceError
-import heapq
-from queue import PriorityQueue
+import typing
+from sortedcontainers import SortedDict
+
 
 log = logging.getLogger(__name__)
 
@@ -34,19 +36,21 @@ class CachePath(Path):
 
 
 class Disk:
+	Path_str = typing.TypeVar('Path_str', Path, str)
 	__MEGABYTE__ = 1024 * 1024
 	__NANOSEC_PER_SEC__ = 1_000_000_000
+	ROOT_INODE = 2
 
 	def __init__(self, sourceDir: Path, cacheDir: Path, maxCacheSize: int, noatime: bool, cacheThreshold=0.99):
 		# fs related:
 		self.sourceDir = Path(sourceDir)
 		if not self.sourceDir.exists():
-			print(f'[{errno.ENOENT}] No such file or directory: {sourceDir}')
+			print(f'[Errno {errno.ENOENT}] {os.strerror(errno.ENOENT)}: {sourceDir}')
 			sys.exit(errno.ENOENT)
 
 		self.cacheDir = Path(cacheDir)
 		if not self.cacheDir.exists():
-			print(f'[{errno.ENOENT}] No such file or directory: {cacheDir}')
+			print(f'[Errno {errno.ENOENT}] {os.strerror(errno.ENOENT)}: {cacheDir}')
 			sys.exit(errno.ENOENT)
 
 		# cache related:
@@ -65,10 +69,10 @@ class Disk:
 	# public api
 	# ==========
 
-	def toCachePath(self, path: Path) -> Path:
+	def toCachePath(self, path: Path_str) -> Path_str:
 		return CachePath.toCachePath(self.sourceDir, self.cacheDir, path)
 
-	def toSrcPath(self, path: Path) -> Path:
+	def toSrcPath(self, path: Path_str) -> Path_str:
 		return CachePath.toSrcPath(self.sourceDir, self.cacheDir, path)
 
 	@staticmethod
@@ -170,8 +174,7 @@ class Disk:
 			if cpath in open_paths:
 				continue
 
-			if not cpath.exists():
-				raise FUSEError('File not in cache although it should be ?')
+			assert cpath.exists(), f'File {Col.path(cpath)} not in cache although it should be ?'
 
 			if os.path.isfile(cpath):
 				os.remove(cpath)
@@ -202,7 +205,7 @@ class Disk:
 			raise NotEnoughSpaceError('Not enough space')
 
 	@staticmethod
-	def _cp2Dir(src: Path, dst: Path):
+	def _cp2Dir(src: Path_str, dst: Path_str):
 		"""
 		Create a copy of `src` in `dst` while also keeping meta-data.
 		Creates parent directories on the fly.
@@ -240,14 +243,15 @@ class Disk:
 		maxCache = self.__maxCacheSize
 		return 100 * usedCache / maxCache, usedCache, maxCache
 
-	def printSummary(self):
+	def getSummary(self):
 		diskUsage, usedCache, maxCache = self.getCurrentStatus()
-		diskUsage = Col.by(f'{diskUsage:.8f}%')
-		usedCache = Col.by(f'{Col.BY}{formatByteSize(usedCache)} ')
-		maxCache = Col.by(f'{formatByteSize(maxCache)} ')
-		copySummary = \
-			Col.bw(
-				f'Cache is currently storing {self.in_cache.qsize()} elements and is {diskUsage} ') + Col.bw(
-				'full\n') + \
-			Col.bw(f" (used: {usedCache}") + Col.bw(f" / {maxCache}") + Col.bw(")")
-		print(copySummary)
+		diskUsage = Col.path(f'{Col.BY}{diskUsage:.8f}%')
+		usedCache = Col.path(formatByteSize(usedCache))
+		maxCache = Col.path(formatByteSize(maxCache))
+		copySummary = Col.BW \
+			+ f'Cache is currently storing {Col.inode(self.getNumberOfElements())} elements and is {diskUsage} '\
+			+ f' full (used: {usedCache} / {maxCache} )'
+		return copySummary
+
+	def printSummary(self):
+		print(self.getSummary())

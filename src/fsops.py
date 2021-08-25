@@ -15,7 +15,7 @@ from logging import getLogger
 
 log = getLogger(__name__)
 
-from util import formatByteSize, Col, MaxPrioQueue, mute_unused
+from util import formatByteSize, Col, MaxPrioQueue, __functionName__
 from vfsops import VFSOps
 from fileInfo import FileInfo
 from errors import NotEnoughSpaceError
@@ -32,33 +32,35 @@ def load_obj(name):
 		return pickle.load(f)
 
 
-class HSMCacheFS(VFSOps):
+class Wolfs(VFSOps):
 	enable_writeback_cache = True
 	enable_acl = True
 
 	def __init__(self, node: remote.RemoteNode, sourceDir: str, cacheDir: str,
-				 metadb=None, logFile=None, noatime=True, maxCacheSizeMB=VFSOps._DEFAULT_CACHE_SIZE):
-		super().__init__(node, Path(sourceDir), Path(cacheDir), maxCacheSizeMB, noatime)
-		mute_unused(metadb, logFile)
+				 metadb='', logFile=None, noatime=True, maxCacheSizeMB=VFSOps._DEFAULT_CACHE_SIZE):
+		super().__init__(node, Path(sourceDir), Path(cacheDir), logFile, maxCacheSizeMB, noatime)
+		# todo / idea:
+		#  - we could use the XDG / freedesktop spec for a the file location of the meta file (~/.config/wolfs/metaFile.db)
+		#  - maybe use same location for config options later on idk (~/.config/wolfs/config.ini)
+		#  - probably use same spec for the .cache data Directory if none was selected (~/.cache/wolfs/)
 		# unused for now:
-		if self.remote.isMounted():
-			transfer_q = self.populate_inode_maps(self.disk.sourceDir)
-			self.copyRecentFilesIntoCache(transfer_q)
-		else:
-			# remote is offline our best guess is to believe that the cache is up to date
-			# todo: set to poll is remote is mounted and replace metafile if so
-			self.restoreInternalState(Path(metadb))
-
-		# self.metadb = metadb
-		# self.log = logFile
-		# self.remote = node
-
-		# initfs
+		# if 'archiv' in metadb:
+		# if self.__ISMOUNTED:
+		# transfer_q = self.populate_inode_maps(self.disk.sourceDir)
+		# self.copyRecentFilesIntoCache(transfer_q)
+		# else:
+		# remote is offline our best guess is to believe that the cache is up to date
+		# todo: set to poll is remote is mounted and replace metafile if so
+		# self.restoreInternalState(Path(metadb))
+		# try:
+		#	#self.vfs.inode_path_map = load_obj(metadb)
+		# except FileNotFoundError or EOFError:
+		#	print(f'File not found {metadb}')
+		# except EOFError:
+		#	# file was corrupted in last run
 		transfer_q = self.populate_inode_maps(self.disk.sourceDir)
-		save_obj(self.vfs._inode_path_map, metadb)
-
-		# fetch most recently used until cache is full to defined threshold or no more to fetch necessary
 		self.copyRecentFilesIntoCache(transfer_q)
+		save_obj(self.vfs.inode_path_map, metadb)
 
 	def populate_inode_maps(self, root: str):
 		"""
@@ -67,10 +69,12 @@ class HSMCacheFS(VFSOps):
 		:param self.time_attr decides if mtime or atime is used
 		:return: MaxPrioQueue() with most recently edited / accessed files (atime / mtime)
 		"""
+		assert isinstance(root, str), f"{__functionName__(self)}: root({root}) must be of type str"
 
-		def print_progress(func_str, st_ino, path):
-			if st_ino in range(1_000, 1_000_000, 1_000):
-				log.debug(f'{Col.BC}{func_str}: {Col.by(f"{Col.bg(st_ino)}-> {path}")}')
+		def print_progress(indexedFileNr: int, func_str: int, st_ino: int, path: str):
+			if indexedFileNr in range(0, 1_000_000, 1_000):
+				log.debug(f'{Col.BY}(#{i}) {Col.BC}{func_str}: {Col.BY}{Col.inode(st_ino)} -> {path}')
+			return i + 1
 
 		transfer_q = MaxPrioQueue()
 
@@ -104,17 +108,18 @@ class HSMCacheFS(VFSOps):
 		return transfer_q
 
 	def copyRecentFilesIntoCache(self, transfer_q: MaxPrioQueue):
-		print(Col.b('Transfering files...'))
+		print(f'{Col.B}Transfering files...{Col.END}')
 		while not transfer_q.empty() and not self.disk.isFull(use_threshold=True):
 			timestamp, (inode, file_size) = transfer_q.pop_nowait()
-			path = self.vfs._inode_path_map[inode].src
+			info: FileInfo = self.vfs.inode_path_map[inode]
+			path, dst = info.src, info.cache
 
 			# skip symbolic links for now
 			if os.path.islink(path):
 				continue
 
 			try:
-				dest = self.disk.cp2Cache(path)
+				self.disk.cp2Cache(path)
 			except NotEnoughSpaceError:
 				# filter the Queue
 				purged_list = MaxPrioQueue()
@@ -126,11 +131,10 @@ class HSMCacheFS(VFSOps):
 
 		# print summary
 		diskUsage, usedCache, maxCache = self.disk.getCurrentStatus()
-		diskUsage = Col.by(f'{diskUsage:.8f}%')
-		usedCache = Col.by(f'{Col.BY}{formatByteSize(usedCache)} ')
-		maxCache = Col.by(f'{formatByteSize(maxCache)} ')
+		diskUsage = Col.path(f'{diskUsage:.8f}%')
+		usedCache = Col.path(f'{Col.BY}{formatByteSize(usedCache)}')
+		maxCache = Col.path(f'{formatByteSize(maxCache)}')
 		copySummary = \
-			Col.bw(f'Finished transfering {self.disk.in_cache.qsize()} elements.\nCache is now {diskUsage} ') + Col.bw(
-				'full') + \
-			Col.bw(f" (used: {usedCache}") + Col.bw(f" / {maxCache}") + Col.bw(")")
+			f'Finished transfering {self.disk.getNumberOfElements()} elements.\nCache is now {diskUsage} full' + \
+			f' (used: {usedCache} / {maxCache})'
 		print(copySummary)

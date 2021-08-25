@@ -9,8 +9,13 @@ from IPython import embed
 embed = embed
 
 from datetime import datetime
+import inspect
 
 DEFAULT_CACHE_SIZE = 512
+__ROOT_INODE__ = 2
+
+def __functionName__(self, i=1):
+	return f"{Col.BY}{self.__class__.__name__}.{inspect.stack()[i][3]}():{Col.BW}"
 
 
 def _exit(s: str):
@@ -23,8 +28,10 @@ def datef(timestamp):
 
 def sizeof(obj):
 	size = sys.getsizeof(obj)
-	if isinstance(obj, dict): return size + sum(map(sizeof, obj.keys())) + sum(map(sizeof, obj.values()))
-	if isinstance(obj, (list, tuple, set, frozenset)): return size + sum(map(sizeof, obj))
+	if isinstance(obj, dict):
+		return size + sum(map(sizeof, obj.keys())) + sum(map(sizeof, obj.values()))
+	elif isinstance(obj, (list, tuple, set, frozenset)):
+		return size + sum(map(sizeof, obj))
 	return size
 
 
@@ -43,7 +50,7 @@ def formatByteSize(b):
 			b = b / 1024
 			j += 1
 		else:
-			return f'{float(b):.4} {sizes[j]}'
+			return f'{float(b):.2} {sizes[j]}'
 
 class MaxPrioQueue(PriorityQueue):
 	"""
@@ -68,22 +75,18 @@ class Col:
 	BOLD = '\033[1m'
 	B = BOLD
 
-	@staticmethod
-	def b(s):
-		return f'{Col.B}{s}{Col.END}'
-
 	WHITE = '\033[37m'
 	W = WHITE
 	BW = BOLD + WHITE
 
-	@staticmethod
-	def bw(s):
-		return f'{Col.BW}{s}{Col.END}'
-
 	PURPLE = '\033[95m'
+	BP = BOLD + PURPLE
+
 	CYAN = '\033[96m'
 	BC = BOLD + CYAN
+
 	DARKCYAN = '\033[36m'
+	BDC = BOLD + DARKCYAN
 
 	BLUE = '\033[94m'
 	BB = BOLD + BLUE
@@ -91,23 +94,26 @@ class Col:
 	GREEN = '\033[92m'
 	BG = BOLD + GREEN
 
-	@staticmethod
-	def bg(s):
-		return f'{Col.BG}{s}{Col.END}'
-
 	YELLOW = '\033[93m'
 	BY = BOLD + YELLOW
-
-	@staticmethod
-	def by(s):
-		return f'{Col.BY}{s}{Col.END}'
 
 	RED = '\033[91m'
 	BR = BOLD + RED
 
-	@staticmethod
-	def br(s):
-		return f'{Col.BR}{s}{Col.END}'
-
 	UNDERLINE = '\033[4m'
 	END = '\033[0m'
+
+	@staticmethod
+	def inode(i):
+		"""Green"""
+		return f'{Col.BG}{i}{Col.BW}'
+
+	@staticmethod
+	def path(p):
+		"""Yellow"""
+		return f'{Col.BY}{p}{Col.BW}'
+
+	@staticmethod
+	def file(f):
+		"""Cyan"""
+		return f'{Col.BC}{f}{Col.BW}'

@@ -15,15 +15,12 @@ class FileInfo:
 		self.src = Path(src)
 		self.cache = Path(cache)
 		# use None as it only uses 2 bytes instead of 5 per file and most files arent folders
-		self._childs = child_inodes
+		self.children = child_inodes
 		self.entry = fileAttrs
 		self.write_ops = None
 
 	def __str__(self):
-		return f'src:{self.src} | cache:{self.cache} | childs:{self._childs}'
-
-	def updateEntry(self, path=None, fd=None, entry=None):
-		self.entry = entry if entry else FileInfo.getattr(path, fd)
+		return f'src:{self.src} | cache:{self.cache} | childs:{self.children}'
 
 	@staticmethod
 	def getattr(path=None, fd=None):

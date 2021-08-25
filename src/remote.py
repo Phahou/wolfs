@@ -8,6 +8,9 @@ from pathlib import Path
 import ctypes
 import ctypes.util
 import os
+import logging
+log = logging.getLogger()
+
 # docs: https://ftp.gnu.org/old-gnu/Manuals/glibc-2.2.3/html_node/libc_629.html
 
 libc = ctypes.CDLL(ctypes.util.find_library('c'), use_errno=True)
@@ -53,7 +56,7 @@ class RemoteNode:
 		#       (something like the MNT_FORCE flag in the mount function)
 
 		# only mount the filesystem for now or pretend you do
-		print('pretended to made remoteFS Availaible')
+		log.debug('pretended to made remoteFS Availaible')
 
 	def isOnline(self):
 		"""sends every 0.5s a ping to check if host is up. Returns after first received ping."""

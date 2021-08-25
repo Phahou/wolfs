@@ -17,7 +17,7 @@ from pathlib import Path
 import logging
 log = logging.getLogger(__name__)
 from disk import CachePath
-from util import is_type
+from util import is_type, Col, __functionName__
 import util
 
 
@@ -30,8 +30,7 @@ class VFS:
 		srcInfo = FileInfo(sourceDir, cacheDir, FileInfo.getattr(sourceDir))
 
 		# TODO: make btree out of this datatype with metafile stored somewhere
-
-		self._inode_path_map: [int, FileInfo] = {}
+		self.inode_path_map: dict[int, FileInfo] = dict()
 
 		# inode related:
 		self._lookup_cnt = defaultdict(lambda: 0)
@@ -55,80 +54,75 @@ class VFS:
 		return inode in self._inode_fd_map
 
 	def getRamUsage(self):
-		return util.formatByteSize(util.sizeof(self._inode_path_map))
+		return util.formatByteSize(util.sizeof(self.inode_path_map))
 
 	# "properties"
 	def del_inode(self, inode: int):
-		del self._inode_path_map[inode]
+		# todo: needs to hold information that remote has to be deleted too
+		# TODO: also change info of parent inode
+		del self.inode_path_map[inode]
 
 	def set_inode_path(self, inode: int, path: str):
 		path = Path(path)
-		self._inode_path_map[inode].src = self.__toSrcPath(path)
-		self._inode_path_map[inode].cache = self.__toCachePath(path)
+		self.inode_path_map[inode].src = self.__toSrcPath(path)
+		self.inode_path_map[inode].cache = self.__toCachePath(path)
 
 	def set_inode_entry(self, inode: int, entry: pyfuse3.EntryAttributes):
-		self._inode_path_map[inode].entry = entry
+		self.inode_path_map[inode].entry = entry
 
 	# ==============
 	# inode handling
 	# ==============
 
-	def inode_to_path(self, inode: int) -> Path:
-		"""
-		simply maps inodes to paths
-		raises errno.ENOENT if not in map -> no such file or directory
-		"""
-		# check cache if not in cache raise error as we indexed everything from sourceDir in __init__
-		# availability is a different matter we simply check if the file exists at all or not
+	def inode_to_cpath(self, inode: int) -> Path:
+		"""Maps inodes to paths. Might raise `FUSEError(errno.ENOENT)`"""
 		try:
-			val = self._inode_path_map[inode].cache
-		except KeyError:
-			# if a file isnt existing we would have a FileInfo entry in the _inode_path_map
-			print(f"inode: {inode} has not path defined: {self._inode_path_map.get(inode)}")
-			raise FUSEError(errno.ENOENT)  # no such file or directory
+			val = self.inode_path_map[inode].cache
+		except KeyError:			# file likely doesnt exist. Logic error otherwise
+			log.error(__functionName__(self) + f" inode: {Col.inode(inode)} has no path defined")
+			raise FUSEError(errno.ENOENT)
 
 		if isinstance(val, set):
-			# In case of hardlinks, pick any path
-			val = next(iter(val))
-		# log.debug(Col.bg(f'_inode_to_path: {inode} -> {val}'))
+			val = next(iter(val))		# In case of hardlinks, pick any path
 		return Path(val)
 
 	def add_Directory(self, inode: int, path: str, entry: pyfuse3.EntryAttributes, child_inodes: [int]):
+		#TODO: needs rework to also include inode_p
 		assert inode not in child_inodes
+		assert entry.st_ino == inode
 		assert Path(path).is_dir()
 
-		self._lookup_cnt[entry.st_ino] += 1
+		self._lookup_cnt[inode] += 1
 		src_p, cache_p = self.__toSrcPath(path), self.__toCachePath(path)
 
 		directory = FileInfo(src_p, cache_p, entry, child_inodes=child_inodes)
-		self._inode_path_map[inode] = directory
-
-	def get_FileInfo(self, inode):
-		return self._inode_path_map[inode]
+		self.inode_path_map[inode] = directory
+		return directory
 
 	def add_path(self, inode: int, path: str, file_attrs=pyfuse3.EntryAttributes()):
+		assert inode == file_attrs.st_ino, f'inode and file_attrs.st_ino have to be the same as file_attrs.st_ino are for lookup'
 		self._lookup_cnt[inode] += 1
 		src_p, cache_p = self.__toSrcPath(path), self.__toCachePath(path)
 
 		# With hardlinks, one inode may map to multiple paths.
-		if inode not in self._inode_path_map:
-			self._inode_path_map[inode] = FileInfo(src_p, cache_p, file_attrs)
+		if inode not in self.inode_path_map:
+			self.inode_path_map[inode] = FileInfo(src_p, cache_p, file_attrs)
 			return
 
 		# no hardlinks for directories
-		if Path(path).is_dir():
+		if os.path.isdir(path):
 			print(path)
-			assert not Path(path).is_dir()
+			assert not os.path.isdir(path)
 
 		# generate hardlink from path as inode is already in map
-		info = self._inode_path_map[inode]
+		info = self.inode_path_map[inode]
 		if is_type(set, [info.src, info.cache]):
 			# saving both to be able to sync later to srcDir
 			info.src.add(src_p)
 			info.cache.add(cache_p)
 		elif info.src != src_p and info.cache != cache_p:
-			self._inode_path_map[inode].src = {src_p, info.src}
-			self._inode_path_map[inode].cache = {path, info.cache}
+			self.inode_path_map[inode].src = {src_p, info.src}
+			self.inode_path_map[inode].cache = {path, info.cache}
 
 	# ============
 	# attr methods
@@ -139,7 +133,7 @@ class VFS:
 		# a setattr() call for an inode without associated directory
 		# handle.
 		if fh is None:
-			path_or_fh = self.inode_to_path(inode)
+			path_or_fh = self.inode_to_cpath(inode)
 			truncate = os.truncate
 			chmod = os.chmod
 			chown = os.chown
@@ -199,7 +193,7 @@ class VFS:
 		if self.already_open(inode):  # if isOpened(inode):
 			return FileInfo.getattr(fd=self._inode_fd_map[inode])
 		else:
-			return FileInfo.getattr(path=self.inode_to_path(inode))
+			return FileInfo.getattr(path=self.inode_to_cpath(inode))
 
 	# pyfuse3 specific ?
 	# ==================
@@ -213,7 +207,7 @@ class VFS:
 			if self._lookup_cnt[inode] > nlookup:
 				self._lookup_cnt[inode] -= nlookup
 				continue
-			log.debug('forgetting about inode %d', inode)
+			log.debug(f'{Col.BY}forgetting about inode {Col.inode(inode)}')
 			assert inode not in self._inode_fd_map
 			del self._lookup_cnt[inode]
 			try:
