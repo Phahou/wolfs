@@ -1,8 +1,11 @@
-hsm-cachefs soll:
+we might need to roll with our own implementation of a inode number generator as currently cache_dir and srcDir inodes
+are mixed and this in turn leads to the problem that files cant be found or moved as their inodes mismatch
+
+wolfs soll:
  - LRU Caching können ( nach Dateigröße )
    -> löst Storage Management
  - [x] FileInfo in readdir verwenden
- - [ ] Verdrängung implementieren
+ - [x] Verdrängung implementieren
  - [x] Kompletten Verzeichnisbaum des eingehängten Ordners kopieren
 
  -> einfachere Bedienung, einfacheres Interface

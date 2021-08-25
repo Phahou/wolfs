@@ -6,3 +6,4 @@ cover.png
 mnt/local_data/*
 mnt/mountpoint/*
 metaInfo.db
+test/test_config.py
