@@ -16,7 +16,11 @@ import logging
 from vfs import VFS
 from fileInfo import FileInfo
 from pathlib import Path
+import re
 import remote
+#from journal import Journal
+from util import __functionName__
+
 
 log = logging.getLogger(__name__)
 
@@ -239,50 +243,6 @@ class VFSOps(pyfuse3.Operations):
 			self.__fetchFile(self.disk.toSrcPath(f), st_size)
 		return f
 
-	async def readlink(self, inode, ctx):
-		path = self._inode_to_path(inode)
-		try:
-			target = os.readlink(path)
-		except OSError as exc:
-			raise FUSEError(exc.errno)
-		return fsencode(target)
-
-	async def link(self, inode, new_inode_p, new_name, ctx):
-		new_name = fsdecode(new_name)
-		parent = self._inode_to_path(new_inode_p)
-		path = os.path.join(parent, new_name)
-		try:
-			os.link(self._inode_to_path(inode), path, follow_symlinks=False)
-		except OSError as exc:
-			raise FUSEError(exc.errno)
-		self._add_path(inode, path)
-		return await self.getattr(inode)
-
-	async def unlink(self, inode_p, name, ctx):
-		name = fsdecode(name)
-		parent = self._inode_to_path(inode_p)
-		path = os.path.join(parent, name)
-		try:
-			inode = os.lstat(path).st_ino
-			os.unlink(path)
-		except OSError as exc:
-			raise FUSEError(exc.errno)
-		if self.vfs.inLookupCnt(inode):
-			self._forget_path(inode, path)
-
-	async def symlink(self, inode_p, name, target, ctx):
-		name = fsdecode(name)
-		target = fsdecode(target)
-		parent = self._inode_to_path(inode_p)
-		path = os.path.join(parent, name)
-		try:
-			os.symlink(target, path)
-			os.chown(path, ctx.uid, ctx.gid, follow_symlinks=False)
-		except OSError as exc:
-			raise FUSEError(exc.errno)
-		stat = os.lstat(path)
-		self._add_path(stat.st_ino, path)
-		return await self.getattr(stat.st_ino)
 
 	async def rename(self, inode_p_old, name_old, inode_p_new, name_new, flags, ctx):
 		if flags != 0:
@@ -380,9 +340,40 @@ class VFSOps(pyfuse3.Operations):
 		self.vfs._fd_open_count[fd] = 1
 		return pyfuse3.FileInfo(fh=fd), attr
 
+	def __unlink_inode(self, inode_p, inode, path):
+		info_p: FileInfo = self.vfs.inode_path_map[inode_p]
+		assert inode in info_p.children, f"{inode} not in {info_p.children}"
+		assert isinstance(info_p.children, list)
+		info_p.children.remove(inode)
+		self.disk.untrack(path)
+
+	async def unlink(self, inode_p, name, ctx):
+		inode_p = self.mnt_ino_translation(inode_p)
+		name = fsdecode(name)
+		log.debug(__functionName__(self) + f' {Col.file(name)} in  {Col.inode(inode_p)}')
+		parent = self.vfs.inode_to_cpath(inode_p)
+		path = os.path.join(parent, name)
+		try:
+
+			if os.path.exists(path):  # file exists in cache
+				os.unlink(path)
+			elif 0 == self.vfs.getInodeOf(path, inode_p):
+				raise FUSEError(errno.ENOENT)
+			inode = self.path_to_ino(path)
+			self.__unlink_inode(inode_p, inode, path)
+
+		except OSError as exc:
+			raise FUSEError(exc.errno)
+		self.journal.unlink(inode, path)
+		if self.vfs.inLookupCnt(inode):
+			self._forget_path(inode, path)
+
 	async def read(self, fd, offset: int, length: int):
-		os.lseek(fd, offset, os.SEEK_SET)
-		return os.read(fd, length)
+		try:
+			os.lseek(fd, offset, os.SEEK_SET)
+			return os.read(fd, length)
+		except OSError as exc:
+			raise FUSEError(exc.errno)
 
 	def __fsync_with_remote(self, cache: Path, flags, write_ops):
 		"""Should work with newly created files too as we are re-using the flags"""
@@ -397,17 +388,6 @@ class VFSOps(pyfuse3.Operations):
 		os.close(fd_cache), os.close(fd_remote)
 
 	async def write(self, fd, offset: int, buf: bytes):
-		"""
-		Write *buf* into *fh* at *off*
-
-		        *fh* will by an integer filehandle returned by a prior `open` or
-		        `create` call.
-
-		        This method must return the number of bytes written. However, unless the
-		        file system has been mounted with the ``direct_io`` option, the file
-		        system *must* always write *all* the provided data (i.e., return
-		        ``len(buf)``).
-		"""
 		# TODO:
 		#   - [x] mark file somewhow as dirty as we have written to it in the cache and they need to be overwritten in the backeend
 		#         is probably only a set of paths or more simpler a True / False thing in the inode_path_map
@@ -452,11 +432,6 @@ class VFSOps(pyfuse3.Operations):
 	# extra methods
 	# =============
 
-	async def access(self, inode, mode, ctx):
-		# for permissions but eh
-		raise FUSEError(errno.ENOSYS)
-
-	#
 	async def flush(self, fh):
 		# 'the close syscall'
 		# might be interesting to look into as if we might run out of space we need to

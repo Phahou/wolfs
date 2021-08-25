@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-from fsops import HSMCacheFS as Operations
+from fsops import Wolfs as Operations
 
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 import logging

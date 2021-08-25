@@ -7,5 +7,5 @@ fi
 #rm -rf mnt/local_data
 #mkdir mnt/local_data
 # while debugging use ram
-rm -rf /tmp/wolfs_data
-mkdir /tmp/wolfs_data
+rm -rf /tmp/wolfs_data/*
+mkdir -p /tmp/wolfs_data
