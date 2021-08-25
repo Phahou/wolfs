@@ -78,32 +78,49 @@ class Wolfs(VFSOps):
 
 		transfer_q = MaxPrioQueue()
 
-		def push_to_queue(dir_attrs):
+		def push_to_queue(ino: int, dir_attrs):
 			last_used = getattr(dir_attrs, self.disk.time_attr) // self.disk.__NANOSEC_PER_SEC__
-			transfer_q.push_nowait((last_used, (dir_attrs.st_ino, dir_attrs.st_size)))
+			transfer_q.push_nowait((last_used, (ino, dir_attrs.st_size)))
 
+		i = 0
+		islink = os.path.islink
+		# reminder that drives actually have very small inode numbers (e.g. 2 or 5)
 		for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+			if islink(dirpath):
+				continue
 			dir_attrs = FileInfo.getattr(path=dirpath)
-			push_to_queue(dir_attrs)
+			inode_p = self.path_to_ino(dirpath)
+			dir_attrs.st_ino = inode_p
+			# print(inode_p, end=', ')
+			directory = self.vfs.add_Directory(inode_p, dirpath, dir_attrs, [])
 
-			child_inodes = []
+			push_to_queue(inode_p, dir_attrs)
+
 			for d in dirnames:
 				# only add child inodes here the subdirs will be walked through
 				subdir_path = os.path.join(dirpath, d)
-				child_inodes.append(FileInfo.getattr(subdir_path).st_ino)
+				if islink(subdir_path):
+					continue
+				directory.children.append(self.path_to_ino(subdir_path))
 
+			# filepaths, fileattrs = [], []
 			for f in filenames:
 				filepath = os.path.join(dirpath, f)
-
+				if islink(filepath):
+					continue
 				file_attrs = FileInfo.getattr(path=filepath)
-				push_to_queue(file_attrs)
+				st_ino = self.path_to_ino(filepath)
+				file_attrs.st_ino = st_ino
+				push_to_queue(st_ino, file_attrs)
+				assert self.path_to_ino(filepath) == self.path_to_ino(filepath), 'path != same path'
+				self.vfs.addFilePath(inode_p, st_ino, filepath, file_attrs)
+				i = print_progress(i, 'add_path', st_ino, filepath)
+			i = print_progress(i, 'add_Directory', inode_p, dirpath)
 
-				self.vfs.add_path(file_attrs.st_ino, filepath, file_attrs)
-				print_progress('add_path', file_attrs.st_ino, filepath)
-				child_inodes.append(file_attrs.st_ino)
-
-			self.vfs.add_Directory(dir_attrs.st_ino, dirpath, dir_attrs, child_inodes)
-			print_progress('add_Directory', dir_attrs.st_ino, dirpath)
+		for k, v in self.vfs.inode_path_map.items():
+			assert k == v.entry.st_ino
+			if v.children:
+				self.vfs.inode_path_map[k].children = sorted(v.children)
 
 		return transfer_q
 
@@ -138,3 +155,17 @@ class Wolfs(VFSOps):
 			f'Finished transfering {self.disk.getNumberOfElements()} elements.\nCache is now {diskUsage} full' + \
 			f' (used: {usedCache} / {maxCache})'
 		print(copySummary)
+
+	def restoreInternalState(self, metadb: Path):
+		# load inodes_path_map from meta-data file
+		# if metadb.exists() and metadb.is_file():
+		# ...
+		try:
+			self.vfs.inode_path_map = load_obj(metadb)
+			return
+		except FileNotFoundError or EOFError:
+			print(f'File not found {metadb}')
+		# except EOFError:
+		# file was corrupted in last run
+		transfer_q = self.populate_inode_maps(self.disk.sourceDir)
+		self.copyRecentFilesIntoCache(transfer_q)

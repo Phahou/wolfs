@@ -24,10 +24,16 @@ import util
 ########################################################################################################################
 
 class VFS:
+	__next_inode = pyfuse3.ROOT_INODE
+
+	def __inode_generator(self):
+		inode = self.__next_inode
+		self.__next_inode += 1
+		return inode
+
 	# I need to save all os operations in this so if a os.lstat is called I can pretend I actually know the stuff
 	def __init__(self, sourceDir: Path, cacheDir: Path):
 		sourceDir, cacheDir = Path(sourceDir), Path(cacheDir)
-		srcInfo = FileInfo(sourceDir, cacheDir, FileInfo.getattr(sourceDir))
 
 		# TODO: make btree out of this datatype with metafile stored somewhere
 		self.inode_path_map: dict[int, FileInfo] = dict()
@@ -37,18 +43,10 @@ class VFS:
 		self._fd_inode_map = dict()
 		self._inode_fd_map = dict()
 		self._fd_open_count = dict()
-		self._inode_dirty_map = dict()
 
 		# shorthands
 		self.__toCachePath = lambda x: CachePath.toCachePath(sourceDir, cacheDir, x)
 		self.__toSrcPath = lambda x: CachePath.toSrcPath(sourceDir, cacheDir, x)
-
-		# root inode needs to be filled here already
-		child_inodes = []
-		for f in os.listdir(srcInfo.src):
-			child_inodes.append(FileInfo.getattr(srcInfo.src.joinpath(Path(f))).st_ino)
-		self.add_Directory(pyfuse3.ROOT_INODE, sourceDir.__str__(), FileInfo.getattr(sourceDir),
-						   child_inodes=child_inodes)
 
 	def already_open(self, inode: int):
 		return inode in self._inode_fd_map
@@ -85,6 +83,42 @@ class VFS:
 		if isinstance(val, set):
 			val = next(iter(val))		# In case of hardlinks, pick any path
 		return Path(val)
+
+	def get_FileInfo(self, inode):
+		return self.inode_path_map[inode]
+
+	# inode <-> path funcs
+	# ====================
+
+	# search for an inode via path
+	def getInodeOf(self, path, inode_p):
+		i2p = self.inode_to_cpath
+		children: list = self.inode_path_map[inode_p].children
+		if not children:
+			return 0
+		assert children, f'children is empty {self.inode_path_map[inode_p].__str__()}'
+		paths = [(child_inode, i2p(child_inode).__str__()) for child_inode in children]
+		old_inode: list = list(filter(lambda path_: path_[1] == path, paths))
+		assert len(old_inode) < 2, f'We have 2 full_paths?'
+		if old_inode:
+			return old_inode[0][0]
+		else:
+			# inode doesnt exist yet (not found)
+			return 0
+
+	def addFilePath(self, inode_p: int, inode: int, path: str, entry: pyfuse3.EntryAttributes):
+		"""Also adds file to parent inode `inode_p`"""
+		assert inode_p != inode, \
+			f"{__functionName__(self)} inode_p({Col.inode(inode_p)}) can't be inode({Col.inode(inode)})"
+		assert inode == entry.st_ino, 'entry ino must be the same as lookup ino'
+		self.add_path(inode, path, entry)
+
+		info_p = self.inode_path_map[inode_p]
+		if info_p.children is None:
+			info_p.children = [inode]
+		else:
+			if inode not in info_p.children:
+				info_p.children.append(inode)
 
 	def add_Directory(self, inode: int, path: str, entry: pyfuse3.EntryAttributes, child_inodes: [int]):
 		#TODO: needs rework to also include inode_p
@@ -210,7 +244,7 @@ class VFS:
 			log.debug(f'{Col.BY}forgetting about inode {Col.inode(inode)}')
 			assert inode not in self._inode_fd_map
 			del self._lookup_cnt[inode]
-			try:
-				self.del_inode(inode)
-			except KeyError:  # may have been deleted
-				pass
+			#try:
+			#	self.del_inode(inode)
+			#except KeyError:  # may have been deleted
+			#	log.warning(__functionName__(self) + f' already deleted {Col.bg(inode)}')
