@@ -17,7 +17,6 @@ class FileInfo:
 		# use None as it only uses 2 bytes instead of 5 per file and most files arent folders
 		self.children = child_inodes
 		self.entry = fileAttrs
-		self.write_ops = None
 
 	def __str__(self):
 		return f'src:{self.src} | cache:{self.cache} | childs:{self.children}'
@@ -36,7 +35,7 @@ class FileInfo:
 
 		entry = pyfuse3.EntryAttributes()
 		# copy file attributes
-		for attr in ('st_ino', 'st_mode', 'st_nlink', 'st_uid', 'st_gid',
+		for attr in ('st_mode', 'st_nlink', 'st_uid', 'st_gid',
 					 'st_rdev', 'st_size', 'st_atime_ns', 'st_mtime_ns',
 					 'st_ctime_ns'):
 			setattr(entry, attr, getattr(stat, attr))  # more general way of entry.'attr' = stat.'attr'

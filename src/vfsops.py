@@ -30,13 +30,15 @@ log = logging.getLogger(__name__)
 
 class VFSOps(pyfuse3.Operations):
 	_DEFAULT_CACHE_SIZE = 512
+	__LOOKUP_NOENT_TIMEOUT_IN_SECS = 5
 
-	def __init__(self, node: remote.RemoteNode, sourceDir: Path, cacheDir: Path, maxCacheSizeMB=_DEFAULT_CACHE_SIZE,
-				 noatime=True):
+	def __init__(self, node: remote.RemoteNode, sourceDir: Path, cacheDir: Path,
+				 logFile: Path, maxCacheSizeMB=_DEFAULT_CACHE_SIZE, noatime=True):
 		super().__init__()
 		sourceDir, cacheDir = Path(sourceDir), Path(cacheDir)
 		self.disk = Disk(sourceDir, cacheDir, maxCacheSizeMB, noatime)
 		self.vfs = VFS(sourceDir, cacheDir)
+		self.journal = Journal(self.disk, self.vfs, logFile)
 		self.remote = node
 
 		self.embed_active = False
@@ -69,9 +71,10 @@ class VFSOps(pyfuse3.Operations):
 					 'f_files', 'f_ffree', 'f_favail'):
 			setattr(stat_, attr, getattr(statfs, attr))
 		stat_.f_namemax = statfs.f_namemax - (len(root.__str__()) + 1)
-		print(Col.bg(f'RAM-Usage: of _inode_path_map: {self.vfs.getRamUsage()} | ' +
-					 f'elements: {str(len(self.vfs._inode_path_map))}'))
-		self.disk.printSummary()
+		log.info( f"{__functionName__(self)}: elements in RAM: {Col.path(len(self.vfs.inode_path_map))}" )
+		if not self.journal.isCompletelyClean():
+			log.info(self.disk.getSummary())
+		self.journal.flushCompleteJournal()
 		return stat_
 
 	async def mknod(self, inode_p, name, mode, rdev, ctx):
@@ -86,7 +89,8 @@ class VFSOps(pyfuse3.Operations):
 		except OSError as exc:
 			raise FUSEError(exc.errno)
 		attr = FileInfo.getattr(path=path)
-		self._add_path(attr.st_ino, path)
+		attr.st_ino = self.path_to_ino(path)
+		self.vfs.add_path(attr.st_ino, path)
 		return attr
 
 	# pyfuse3 specific ?
@@ -178,6 +182,8 @@ class VFSOps(pyfuse3.Operations):
 			os.rmdir(path)
 		except OSError as exc:
 			raise FUSEError(exc.errno)
+
+		self.journal.rmdir(inode, path)
 		if self.vfs.inLookupCnt(inode):
 			self._forget_path(inode, path)
 
@@ -193,9 +199,7 @@ class VFSOps(pyfuse3.Operations):
 		log.info(f'{__functionName__(self)} {Col.path(path)}')
 		await self.__readdir(inode, off, token)
 
-		await self.__readdir(inode, path, off, token)
-
-	async def __readdir(self, inode: int, path, off, token):
+	async def __readdir(self, inode: int, off: int, token):
 		entries = []
 		# copy attributes from src Filesystem
 		if childs := self.vfs.inode_path_map[inode].children:
@@ -290,6 +294,7 @@ class VFSOps(pyfuse3.Operations):
 			log.error('Tried to fetch a file larger than the cache Size Quota')
 			raise FUSEError(errno.EDQUOT)
 
+		open_paths, write_ops_reserved_size = self.journal.getDirtyPaths()
 		self.disk.cp2Cache(f, force=True, open_paths=open_paths)
 
 	async def open(self, inode: int, flags: int, ctx):
@@ -396,22 +401,20 @@ class VFSOps(pyfuse3.Operations):
 		#         and sync them later via write ops instead of rewriting the whole file
 		#         adv: we dont need a lot of extra space (just 2 ints per dirty file) as we use the file itself but redo everything we did in the cache file
 		#         notice: we need to set the attributes to the same values as in the cache then
-		os.lseek(fd, offset, os.SEEK_SET)
-		# TODO: notice: keep docstring in mind esp. direct_io
-		# if errors are encountered exceptions automatically erupt (e.g. MemoryError)
-		bytes_written = os.write(fd, buf)
+		try:
+			os.lseek(fd, offset, os.SEEK_SET)
+			# TODO: notice: keep docstring in mind esp. direct_io
+			# if errors are encountered exceptions automatically erupt (e.g. MemoryError)
+			bytes_written = os.write(fd, buf)
 
-		write_op = (offset, bytes_written)
-
-		# hint for the flush function
-		if not self.vfs._fd_dirty_map.get(fd):
-			write_history: list = self.vfs._fd_dirty_map[fd]
-			write_history.append(write_op)
-			self.vfs._fd_dirty_map[fd] = write_history
-		else:
-			self.vfs._fd_dirty_map[fd] = [write_op]
-
-		return bytes_written
+			# as we might crash without notice it is paramount to be able to
+			# replay the write_ops without knowning fd<->inode relation
+			# so we use inodes instead of fds ...
+			inode: int = self.vfs._fd_inode_map.get(fd)
+			self.journal.write(inode, offset, bytes_written)
+			return bytes_written
+		except OSError as exc:
+			raise FUSEError(exc.errno)
 
 	# trunacte is not a function in pyfuse3
 
@@ -433,25 +436,9 @@ class VFSOps(pyfuse3.Operations):
 	# =============
 
 	async def flush(self, fh):
-		# 'the close syscall'
-		# might be interesting to look into as if we might run out of space we need to
-		# wakeup the backend for sync
-		if write_ops := self.vfs._fd_dirty_map[fh]:
-			inode: int = self.vfs._fd_inode_map[fh]
-			info: FileInfo = self.vfs._inode_path_map[inode]
-			info.write_ops = write_ops
-			self.vfs._fd_inode_map[fh] = None
-		# TODO: sync up later (timer would probably be the best choice or
-		#  		some kind of check if there is almost no space available on underlying cache disk)
-
-		# TODO: :notice: difference between flush and fsync:
-		#	    flush: data _to be written_ to disk
-		#       fsync: data _is written_ to disk
-		#	need to think about if fsync shall be used to write to backeend directly
-		#	mhm if I call fsync here it is already commited to disk
-		#   the programs above dont need to know if something is on a not accessible drive or not tbh
-		#   -> fsync it is
-		return os.fsync(fh)
+		inode: int = self.vfs._fd_inode_map.get(fh)
+		self.journal.flush(inode, fh)  # store write history for later sync
+		return os.fsync(fh)  # data is only written to cache_dir
 
 	async def fsync(self, fh, datasync):
 		log.warning(f'{self.__class__.__name__}.fsync(): Not implemented')
