@@ -1,28 +1,20 @@
 import os
 from pathlib import Path
-
-import pyfuse3
-from pyfuse3 import FUSEError
-
+from pyfuse3 import FUSEError, EntryAttributes
+from typing import Union, Optional
 
 class FileInfo:
-	"""
-	this class should hold any file system information like
-	path, attributes, child_inodes
-	"""
 
-	def __init__(self, src: Path, cache: Path, fileAttrs: pyfuse3.EntryAttributes, child_inodes=None):
-		self.src = Path(src)
-		self.cache = Path(cache)
-		# use None as it only uses 2 bytes instead of 5 per file and most files arent folders
-		self.children = child_inodes
-		self.entry = fileAttrs
+	def __init__(self, src: Path, cache: Path, fileAttrs: EntryAttributes) -> None:
+		self.src: Union[Path, set[Path]] = Path(src)
+		self.cache: Union[Path, set[Path]] = Path(cache)
+		self.entry: EntryAttributes = fileAttrs
 
-	def __str__(self):
-		return f'src:{self.src} | cache:{self.cache} | childs:{self.children}'
+	def __str__(self) -> str:
+		return f'src:{self.src} | cache:{self.cache}'
 
 	@staticmethod
-	def getattr(path=None, fd=None):
+	def getattr(path: Union[str, Path] = None, fd: int = None) -> EntryAttributes:
 		assert fd is None or path is None
 		assert not (fd is None and path is None)
 		try:
@@ -33,7 +25,7 @@ class FileInfo:
 		except OSError as exc:
 			raise FUSEError(exc.errno)
 
-		entry = pyfuse3.EntryAttributes()
+		entry = EntryAttributes()
 		# copy file attributes
 		for attr in ('st_mode', 'st_nlink', 'st_uid', 'st_gid',
 					 'st_rdev', 'st_size', 'st_atime_ns', 'st_mtime_ns',
@@ -52,3 +44,11 @@ class FileInfo:
 		entry.st_blocks = ((entry.st_size + entry.st_blksize - 1) // entry.st_blksize)
 
 		return entry
+
+class DirInfo(FileInfo):
+	def __init__(self, src: Path, cache: Path, fileAttrs: EntryAttributes, child_inodes: list[int]) -> None:
+		super().__init__(src, cache, fileAttrs)
+		self.children: list[int] = child_inodes
+
+	def __str__(self) -> str:
+		return f'src:{self.src} | cache:{self.cache} | childs:{self.children}'

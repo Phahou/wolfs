@@ -1,4 +1,6 @@
 #!/usr/bin/python
+# type: ignore
+
 import os
 import random
 

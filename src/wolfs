@@ -1,6 +1,9 @@
 #!/usr/bin/python3
-from fsops import Wolfs as Operations
 
+# mypy ignore whole file
+# type: ignore
+
+from fsops import Wolfs as Operations
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 import logging
 import pyfuse3

@@ -1,24 +1,21 @@
 #!/usr/bin/python
 
-# suppress 'unused' warnings
-from IPython import embed
-
-embed = embed
-
+from vfs import SOFTLINK_DISABLED_ERROR
 import os
 import pyfuse3
 import errno
 from pyfuse3 import FUSEError
 from os import fsencode, fsdecode
-from disk import Disk
+from disk import Disk, Path_str
 from util import Col
 import logging
 from vfs import VFS
-from fileInfo import FileInfo
+from fileInfo import FileInfo, DirInfo
 from pathlib import Path
+from typing import Final, Union, cast, Optional
 import re
-import remote
-#from journal import Journal
+from remote import RemoteNode # type: ignore
+from journal import Journal
 from util import __functionName__
 
 
@@ -29,11 +26,12 @@ log = logging.getLogger(__name__)
 # ======================================================================================================================
 
 class VFSOps(pyfuse3.Operations):
-	_DEFAULT_CACHE_SIZE = 512
-	__LOOKUP_NOENT_TIMEOUT_IN_SECS = 5
+	_DEFAULT_CACHE_SIZE: Final[int] = 512
+	__LOOKUP_NOENT_TIMEOUT_IN_SECS: Final[int] = 5
+	_STDOUT: Final[str] = "/dev/stdout"
 
-	def __init__(self, node: remote.RemoteNode, sourceDir: Path, cacheDir: Path,
-				 logFile: Path, maxCacheSizeMB=_DEFAULT_CACHE_SIZE, noatime=True):
+	def __init__(self, node: RemoteNode, sourceDir: Path, cacheDir: Path,
+				 logFile: Path, maxCacheSizeMB: int = _DEFAULT_CACHE_SIZE, noatime: bool = True):
 		super().__init__()
 		sourceDir, cacheDir = Path(sourceDir), Path(cacheDir)
 		self.disk = Disk(sourceDir, cacheDir, maxCacheSizeMB, noatime)
@@ -43,13 +41,13 @@ class VFSOps(pyfuse3.Operations):
 
 	# special fs methods
 	# ==================
-	def mnt_ino_translation(self, inode):
+	def mnt_ino_translation(self, inode: int) -> int:
 		return self.disk.mnt_ino_translation(inode)
 
-	def path_to_ino(self, some_path) -> int:
+	def path_to_ino(self, some_path: Path_str) -> int:
 		return self.disk.path_to_ino(some_path)
 
-	async def statfs(self, ctx):
+	async def statfs(self, ctx: pyfuse3.RequestContext) -> pyfuse3.StatvfsData:
 		"""Easisest function to get a entrypoint into the code (not many df calls all around)"""
 		root_ino = self.mnt_ino_translation(pyfuse3.ROOT_INODE)
 		root = self.vfs.inode_to_cpath(root_ino)
@@ -62,13 +60,13 @@ class VFSOps(pyfuse3.Operations):
 					 'f_files', 'f_ffree', 'f_favail'):
 			setattr(stat_, attr, getattr(statfs, attr))
 		stat_.f_namemax = statfs.f_namemax - (len(root.__str__()) + 1)
-		log.info( f"{__functionName__(self)}: elements in RAM: {Col.path(len(self.vfs.inode_path_map))}" )
+		log.info(f"{__functionName__(self)}: elements in RAM: {Col.path(len(self.vfs.inode_path_map))}")
 		if not self.journal.isCompletelyClean():
 			log.info(self.disk.getSummary())
 		self.journal.flushCompleteJournal()
 		return stat_
 
-	async def mknod(self, inode_p, name, mode, rdev, ctx):
+	async def mknod(self, inode_p: int, name: str, mode: int, rdev: int, ctx: pyfuse3.RequestContext) -> pyfuse3.EntryAttributes:
 		# create special or ordinary file
 		# mostly used for fifo / pipes but nowadays mkfifo would be better suited for that
 		# mostly rare use cases
@@ -88,16 +86,16 @@ class VFSOps(pyfuse3.Operations):
 	# ==================
 
 	# inode functions
-	async def forget(self, inode_list):
-		translated_ino_list = []
-		inode_list = sorted(inode_list)
-		for (ino, nlookup) in inode_list:
+	async def forget(self, inode_list: list[tuple[int, int]]) -> None:
+		translated_ino_list: list[tuple[int, int]] = []
+		sorted_inodes: list[tuple[int, int]] = sorted(inode_list)
+		for (ino, nlookup) in sorted_inodes:
 			translated_ino_list.append((self.mnt_ino_translation(ino), nlookup))
-		log.debug(__functionName__(
-			self) + f' for untranslated: {Col.inode(inode_list)} -> {Col.inode(translated_ino_list)}(translated)' + Col.END)
-		return await self.vfs.forget(translated_ino_list)
+		log.debug(__functionName__(self) +
+		f' for untranslated: {Col.inode(sorted_inodes)} -> {Col.inode(translated_ino_list)} (translated)' + Col.END)
+		await self.vfs.forget(translated_ino_list)
 
-	def _forget_path(self, inode, path):
+	def _forget_path(self, inode: int, path: str) -> None:
 		# gets called internally so no translation
 		log.debug(f'{__functionName__(self)} {Col.path(path)} for {Col.inode(inode)}')
 		val = self.vfs.inode_to_cpath(inode)
@@ -109,7 +107,7 @@ class VFSOps(pyfuse3.Operations):
 			self.vfs.del_inode(inode)
 
 	# done?
-	async def lookup(self, inode_p, name, ctx=None):
+	async def lookup(self, inode_p: int, name: str, ctx: pyfuse3.RequestContext = None) -> pyfuse3.EntryAttributes:
 		name = fsdecode(name)
 		inode_p = self.mnt_ino_translation(inode_p)
 		# why does it use the inode numbers of the cache directory ?
@@ -119,16 +117,18 @@ class VFSOps(pyfuse3.Operations):
 			log.debug(f'{__functionName__(self)} for {Col.file(name)} in {Col.inode(inode_p)}')
 		return await self.__lookup(inode_p, name, ctx)
 
-	async def __lookup(self, inode_p, name, ctx=None):
-		def incLookupCount(st_ino):
+	async def __lookup(self, inode_p: int, name: str, ctx: pyfuse3.RequestContext = None) -> pyfuse3.EntryAttributes:
+
+		def incLookupCount(st_ino: int) -> None:
 			if name != '.' and name != '..':
 				self.vfs._lookup_cnt[st_ino] += 1
 
 		path: Path = self.vfs.inode_to_cpath(inode_p) / Path(name)
 
 		# check if directory and children are known
-		if children := self.vfs.inode_path_map[inode_p].children:
-			for child_inode in children:
+		info = self.vfs.inode_path_map[inode_p]
+		if isinstance(info, DirInfo):
+			for child_inode in info.children:
 				if path == self.vfs.inode_to_cpath(child_inode):
 					incLookupCount(inode_p)
 					assert child_inode == self.vfs.inode_path_map[child_inode].entry.st_ino
@@ -147,10 +147,10 @@ class VFSOps(pyfuse3.Operations):
 	# attr methods (from vfs)
 	# =======================
 
-	async def setattr(self, inode, attr, fields, fh, ctx):
+	async def setattr(self, inode: int, attr: pyfuse3.EntryAttributes, fields: pyfuse3.SetattrFields, fh: int, ctx: pyfuse3.RequestContext) -> pyfuse3.EntryAttributes:
 		return await self.vfs.setattr(inode, attr, fields, fh, ctx)
 
-	async def getattr(self, inode, ctx=None):
+	async def getattr(self, inode: int, ctx: pyfuse3.RequestContext = None) -> pyfuse3.EntryAttributes:
 		inode_untranslated = inode
 		inode = self.mnt_ino_translation(inode_untranslated)
 		log.info(f'{__functionName__(self)} for {Col.inode(inode)}(translated from: {Col.inode(inode_untranslated)})')
@@ -160,103 +160,26 @@ class VFSOps(pyfuse3.Operations):
 		entry.st_ino = self.path_to_ino(path)
 		return entry
 
-	# directory methods
-	# =================
-
-	async def mkdir(self, inode_p, name, mode, ctx):
-		log.info(__functionName__(self) + f" {Col.file(name)} in {Col.inode(inode_p)} with mode {Col.file(mode & ctx.umask)}")
-		# works but isnt snappy (folder is only shown after reentering it in thunar)
-		path = os.path.join(self.vfs.inode_to_cpath(inode_p), fsdecode(name))
-		if inode := self.vfs.getInodeOf(path, inode_p):
-			raise FUSEError(errno.EEXIST)
-		try:
-			# can succeed as dir might not be present in cache
-			os.mkdir(path, mode=(mode & ~ctx.umask))
-			os.chown(path, ctx.uid, ctx.gid)
-		except OSError as exc:
-			raise FUSEError(exc.errno)
-		attr = FileInfo.getattr(path=path)
-		attr.st_ino = self.path_to_ino(path)
-		self.disk.track(path)
-		self.vfs.addFilePath(inode_p, attr.st_ino, path, attr)
-		self.journal.mkdir(attr.st_ino, path, mode)
-		return attr
-
-	async def rmdir(self, inode_p, name, ctx):
-		# TODO: log on success
-		#       die.net: Upon successful completion, the rmdir() function shall mark for update the st_ctime and st_mtime fields of the parent directory.
-		#       -> update entries
-		inode_p = self.mnt_ino_translation(inode_p)
-
-		name = fsdecode(name)
-		parent = self.vfs.inode_to_cpath(inode_p)
-		path = os.path.join(parent, name)
-		inode = self.path_to_ino(path)
-		log.info(__functionName__(
-			self) + f" {Col.inode(inode)}({Col.path(path)}) in {Col.inode(inode_p)}({Col.path(parent)})" + Col.END)
-		self.fetchFile(inode)
-		try:
-			os.rmdir(path)
-		except OSError as exc:
-			raise FUSEError(exc.errno)
-
-		self.journal.rmdir(inode, path)
-		if self.vfs.inLookupCnt(inode):
-			self._forget_path(inode, path)
-
-	async def opendir(self, inode, ctx):
-		inode = self.mnt_ino_translation(inode)
-		log.info(f"{__functionName__(self)} {self.vfs.inode_to_cpath(inode)}")
-		log.info(f"{Col.BW}Containing: {Col.file(self.vfs.inode_path_map[inode].children)}")
-		# ctx contains gid, uid, pid and umask
-		return inode
-
-	async def readdir(self, inode, off, token):
-		path = self.vfs.inode_to_cpath(inode)
-		log.info(f'{__functionName__(self)} {Col.path(path)}')
-		await self.__readdir(inode, off, token)
-
-	async def __readdir(self, inode: int, off: int, token):
-		entries = []
-		# copy attributes from src Filesystem
-		if childs := self.vfs.inode_path_map[inode].children:
-			log.debug(__functionName__(self) + f' searching through {Col.inode(childs)}')
-			for child_inode in childs:
-				try:
-					info: FileInfo = self.vfs.inode_path_map[child_inode]
-					# __Very strange__ that `info.entry.st_ino` changes between calls although we dont write to it ?
-					# info.entry.st_ino = child_inode
-
-					entries.append((child_inode, info.cache.name, info.entry))
-				except KeyError as exc:
-					# TODO: ignore missing symlinks for now
-					log.error(f'{Col.BR}Ignored FileInfo of {Col.BG}{child_inode}')
-
-		else:
-			entries = ()
-
-		s_entries = sorted(entries)
-
-		log.debug('  read %d entries, starting at %d', len(entries), off)
-		# This is not fully posix compatible. If there are hardlinks
-		# (two names with the same inode), we don't have a unique
-		# offset to start in between them. Note that we cannot simply
-		# count entries, because then we would skip over entries
-		# (or return them more than once) if the number of directory
-		# entries changes between two calls to readdir().
-		for (ino, name, attr) in s_entries:
-			if ino <= off:
-				continue
-			log.debug(f"    {Col.inode(ino)}, {Col.file(name)}")
-			if pyfuse3.readdir_reply(token, fsencode(name), attr, ino):
-				self.vfs._lookup_cnt[attr.st_ino] += 1
-			else:
-				break
-
 	# path methods
 	# ============
+	def __fetchFile(self, f: Path, size: int) -> None:
+		"""
+		Discards one or multiple files to make space for `f`
+		Strategry used is to discard the Least recently used files
+		:raise pyfuse3.FUSEError  with errno set to according error
+		"""
+		assert not os.path.islink(f), "open()-syscalls are only bound to files as opendir() exists!"
 
-	def fetchFile(self, inode: int):
+		# in case the file is bigger than the whole cache size (likely on small cache sizes)
+		log.info(f"{__functionName__(self)} {Col.file(f)}")
+		if not self.disk.canFit(size):
+			log.error('Tried to fetch a file larger than the cache Size Quota')
+			raise FUSEError(errno.EDQUOT)
+
+		open_paths, write_ops_reserved_size = self.journal.getDirtyPaths()
+		self.disk.cp2Cache(f, force=True, open_paths=open_paths)
+
+	def fetchFile(self, inode: int) -> Path:
 		f: Path = self.vfs.inode_to_cpath(inode)
 		st_size: int = self.vfs.inode_path_map[inode].entry.st_size
 		if not f.exists():
@@ -264,20 +187,18 @@ class VFSOps(pyfuse3.Operations):
 			self.__fetchFile(self.disk.toSrcPath(f), st_size)
 		return f
 
-
-	async def rename(self, inode_p_old, name_old, inode_p_new, name_new, flags, ctx):
+	async def rename(self, inode_p_old: int, name_old: str, inode_p_new: int, name_new: str, flags: int, ctx: pyfuse3.RequestContext) -> None:
 		if flags != 0:
 			raise FUSEError(errno.EINVAL)
 
-		def rename_childs(childs, parent_new: str):
+		def rename_childs(childs: list[int], parent_new: str) -> None:
 			for child in childs:
-				cache: Path = self.vfs.inode_path_map[child].cache
+				child_info = self.vfs.inode_path_map[child]
+				cache: Path = child_info.cache # type: ignore
+				assert isinstance(cache, Path), f"{__functionName__(self, 2)} {SOFTLINK_DISABLED_ERROR}{Col.END}"
 				self.vfs.inode_path_map[child].cache = Path(cache.__str__().replace(cache.parent.__str__(), parent_new))
-				rename_childs(self.vfs.inode_path_map[child].children, parent_new)
-
-		def logMsg():
-			log.debug(__functionName__(self, 2) + f'Trying to delete {Col.inode(ino_old)}({Col.path(path_old)}) ' +
-					  f'from {Col.file(info_old_p.children)} ({Col.path(info_old_p.cache)})')
+				if isinstance(child_info, DirInfo):
+					rename_childs(child_info.children, parent_new)
 
 		# TODO: https://linux.die.net/man/3/rename
 		#       could be made completly in memory as nothing is opened written
@@ -306,19 +227,26 @@ class VFSOps(pyfuse3.Operations):
 			raise FUSEError(exc.errno)
 
 		# file is renamed now we need to update our internal entries
-		info_old_p: FileInfo = inoPathMap[inode_p_old]
-		info_new_p: FileInfo = inoPathMap[inode_p_new]
-		logMsg()
+		info_old_p: DirInfo = cast(DirInfo, inoPathMap[inode_p_old])
+
+		old_children: list[int] = info_old_p.children
+		new_children: list[int] = cast(DirInfo, inoPathMap[inode_p_new]).children
+
+		# look if this is right idk really it's getting late....
+		def logMsg(self: VFSOps, ino_old: int, path_old: str, children: list[int], cache_path: str) -> None:
+			log.debug(__functionName__(self, 2) + f'Trying to delete {Col.inode(ino_old)}({Col.path(path_old)}) ' +
+					  f'from {Col.file(children)} ({Col.path(cache_path)})')
+		logMsg(self, inode_p_old, path_old, old_children, info_old_p.cache.__str__())
 
 		# remove from old parent
-		info_old_p.children.remove(ino_old)
+		old_children.remove(ino_old)
 		self.disk.untrack(path_old)
 
 		# add to new parent
-		info_new_p.children.append(ino_old)
+		new_children.append(ino_old)
 		self.disk.track(path_new)
 
-		info_ino_old: FileInfo = inoPathMap[ino_old]
+		info_ino_old: DirInfo = cast(DirInfo, inoPathMap[ino_old])
 		# move FileInfo to new inode. Journal changes src if synced
 		info_ino_old.cache = Path(path_new)  # no hardlinks atm this should be fine
 		self.journal.rename(ino_old, path_old, path_new)
@@ -331,30 +259,13 @@ class VFSOps(pyfuse3.Operations):
 	# File methods (functions with file descriptors)
 	# ==============================================
 
-	def __fetchFile(self, f: Path, size: int):
-		"""
-		Discards one or multiple files to make space for `f`
-		Strategry used is to discard the Least recently used files
-		:raise pyfuse3.FUSEError  with errno set to according error
-		"""
-		assert not os.path.islink(f), "open()-syscalls are only bound to files as opendir() exists!"
-
-		# in case the file is bigger than the whole cache size (likely on small cache sizes)
-		log.info(f"{__functionName__(self)} {Col.file(f)}")
-		if not self.disk.canFit(size):
-			log.error('Tried to fetch a file larger than the cache Size Quota')
-			raise FUSEError(errno.EDQUOT)
-
-		open_paths, write_ops_reserved_size = self.journal.getDirtyPaths()
-		self.disk.cp2Cache(f, force=True, open_paths=open_paths)
-
-	async def open(self, inode: int, flags: int, ctx):
+	async def open(self, inode: int, flags: int, ctx: pyfuse3.RequestContext) -> pyfuse3.FileInfo:
 		inode, inode_old = self.mnt_ino_translation(inode), inode
 		log.debug(__functionName__(
 			self) + f' {Col.inode(inode)}, flags: {Col.file(flags)}; old_ino: {Col.inode(inode_old)}')
 
 		if self.vfs.already_open(inode):
-			fd = self.vfs._inode_fd_map[inode]
+			fd: int = self.vfs._inode_fd_map[inode]
 			self.vfs._fd_open_count[fd] += 1
 			log.info(__functionName__(self), f" (fd, inode): ({fd}, {Col.inode(inode)})")
 			return pyfuse3.FileInfo(fh=fd)
@@ -367,7 +278,7 @@ class VFSOps(pyfuse3.Operations):
 			f = self.fetchFile(inode)
 
 			# File is in Cache now
-			fd: int = os.open(f, flags)
+			fd = os.open(f, flags)
 			attr = FileInfo.getattr(f)
 			attr.st_ino = inode
 			info.entry = attr
@@ -380,7 +291,7 @@ class VFSOps(pyfuse3.Operations):
 
 		return pyfuse3.FileInfo(fh=fd)
 
-	async def create(self, inode_p, name: str, mode: int, flags: int, ctx):
+	async def create(self, inode_p: int, name: str, mode: int, flags: int, ctx: pyfuse3.RequestContext) -> tuple[pyfuse3.FileInfo, pyfuse3.EntryAttributes]:
 		inode_p = self.mnt_ino_translation(inode_p)
 		path: str = os.path.join(self.vfs.inode_to_cpath(inode_p), fsdecode(name))
 		log.debug(__functionName__(self) + ' ' + Col.file(path) + ' in ' + Col.inode(inode_p) + Col.END)
@@ -401,27 +312,25 @@ class VFSOps(pyfuse3.Operations):
 		f: pyfuse3.FileInfo = pyfuse3.FileInfo(fh=fd)
 		return f, attr
 
-	def __unlink_inode(self, inode_p, inode, path):
-		info_p: FileInfo = self.vfs.inode_path_map[inode_p]
+	def __unlink_inode_in_parent_directory(self, inode_p: int, inode: int, path: str) -> None:
+		info_p: DirInfo = cast(DirInfo, self.vfs.inode_path_map[inode_p])
+		assert isinstance(info_p, DirInfo), "Type mismatch"
 		assert inode in info_p.children, f"{inode} not in {info_p.children}"
-		assert isinstance(info_p.children, list)
 		info_p.children.remove(inode)
 		self.disk.untrack(path)
 
-	async def unlink(self, inode_p, name, ctx):
+	async def unlink(self, inode_p: int, name: str, ctx: pyfuse3.RequestContext) -> None:
 		inode_p = self.mnt_ino_translation(inode_p)
 		name = fsdecode(name)
 		log.debug(__functionName__(self) + f' {Col.file(name)} in  {Col.inode(inode_p)}')
 		parent = self.vfs.inode_to_cpath(inode_p)
 		path = os.path.join(parent, name)
 		try:
-
 			if os.path.exists(path):  # file exists in cache
 				os.unlink(path)
-			elif 0 == self.vfs.getInodeOf(path, inode_p):
-				raise FUSEError(errno.ENOENT)
+			self.vfs.getInodeOf(path, inode_p) # check if path still exists virtually
 			inode = self.path_to_ino(path)
-			self.__unlink_inode(inode_p, inode, path)
+			self.__unlink_inode_in_parent_directory(inode_p, inode, path)
 
 		except OSError as exc:
 			raise FUSEError(exc.errno)
@@ -429,14 +338,14 @@ class VFSOps(pyfuse3.Operations):
 		if self.vfs.inLookupCnt(inode):
 			self._forget_path(inode, path)
 
-	async def read(self, fd, offset: int, length: int):
+	async def read(self, fd: int, offset: int, length: int) -> bytes:
 		try:
 			os.lseek(fd, offset, os.SEEK_SET)
 			return os.read(fd, length)
 		except OSError as exc:
 			raise FUSEError(exc.errno)
 
-	def __fsync_with_remote(self, cache: Path, flags, write_ops):
+	def __fsync_with_remote(self, cache: Path, flags: int, write_ops: list[tuple[int, int]]) -> None:
 		"""Should work with newly created files too as we are re-using the flags"""
 		remote = self.disk.toSrcPath(cache)
 		fd_cache, fd_remote = os.open(cache, flags), os.open(remote, flags)
@@ -446,9 +355,10 @@ class VFSOps(pyfuse3.Operations):
 			buf = os.read(fd_cache, buflen)
 			os.write(fd_remote, buf)
 		os.fsync(fd_remote)
-		os.close(fd_cache), os.close(fd_remote)
+		os.close(fd_cache)
+		os.close(fd_remote)
 
-	async def write(self, fd, offset: int, buf: bytes):
+	async def write(self, fd: int, offset: int, buf: bytes) -> int:
 		# TODO:
 		#   - [x] mark file somewhow as dirty as we have written to it in the cache and they need to be overwritten in the backeend
 		#         is probably only a set of paths or more simpler a True / False thing in the inode_path_map
@@ -466,7 +376,8 @@ class VFSOps(pyfuse3.Operations):
 			# as we might crash without notice it is paramount to be able to
 			# replay the write_ops without knowning fd<->inode relation
 			# so we use inodes instead of fds ...
-			inode: int = self.vfs._fd_inode_map.get(fd)
+			inode: Optional[int] = self.vfs._fd_inode_map.get(fd)
+			assert inode is not None
 			self.journal.write(inode, offset, bytes_written)
 			return bytes_written
 		except OSError as exc:
@@ -474,7 +385,7 @@ class VFSOps(pyfuse3.Operations):
 
 	# trunacte is not a function in pyfuse3
 
-	async def release(self, fd):
+	async def release(self, fd: int) -> None:
 		if self.vfs._fd_open_count[fd] > 1:
 			self.vfs._fd_open_count[fd] -= 1
 			return
@@ -491,15 +402,16 @@ class VFSOps(pyfuse3.Operations):
 	# extra methods
 	# =============
 
-	async def flush(self, fh):
-		inode: int = self.vfs._fd_inode_map.get(fh)
+	async def flush(self, fh: int) -> None:
+		inode: Optional[int] = self.vfs._fd_inode_map.get(fh)
+		assert inode is not None
 		self.journal.flush(inode, fh)  # store write history for later sync
 		return os.fsync(fh)  # data is only written to cache_dir
 
-	async def fsync(self, fh, datasync):
+	async def fsync(self, fh: int, datasync: bool) -> None:
 		log.warning(f'{self.__class__.__name__}.fsync(): Not implemented')
 		raise FUSEError(errno.ENOSYS)
 
-	async def releasedir(self, fh):
+	async def releasedir(self, fh: int) -> None:
 		# same as normal release() no more fh are using it
 		log.info(f"{__functionName__(self)} {self.vfs.inode_to_cpath(fh)}")

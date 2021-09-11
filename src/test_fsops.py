@@ -1,4 +1,8 @@
 #!/usr/bin/python
+
+# mypy ignore whole file
+# type: ignore
+
 from IPython import embed
 
 TEST_FILE = __file__

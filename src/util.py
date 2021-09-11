@@ -3,31 +3,43 @@ from queue import PriorityQueue
 
 import sys
 import traceback
-# suppress 'unused' warnings
 from IPython import embed
 
 embed = embed
 
+from typing import Callable
+import functools
 from datetime import datetime
 import inspect
+from typing import Final
 
-DEFAULT_CACHE_SIZE = 512
-__ROOT_INODE__ = 2
+DEFAULT_CACHE_SIZE: Final[int] = 512
+__ROOT_INODE__: Final[int] = 2
 
-def __functionName__(self, i=1):
+def __functionName__(self: object, i: int = 1) -> str:
 	return f"{Col.BY}{self.__class__.__name__}.{inspect.stack()[i][3]}():{Col.BW}"
 
 
-def _exit(s: str):
-	traceback.print_tb()
+def convert(func: Callable) -> Callable:
+	@functools.wraps(func)
+	def wrapper_type_cast(func, *args, **kwargs):  # type: ignore
+		value = func(*args, **kwargs)
+		print(type(value) + ': ' + value)
+		# Do something after
+		return value
+
+	return wrapper_type_cast
+
+def _exit(s: str) -> None:
+	traceback.print_tb(None)
 	sys.exit(s)
 
 
-def datef(timestamp):
+def datef(timestamp: int) -> str:
 	return datetime.fromtimestamp(timestamp).strftime("%d.%b.%Y %H:%M")
 
-def sizeof(obj):
-	size = sys.getsizeof(obj)
+def sizeof(obj: object) -> int:
+	size: int = sys.getsizeof(obj)
 	if isinstance(obj, dict):
 		return size + sum(map(sizeof, obj.keys())) + sum(map(sizeof, obj.values()))
 	elif isinstance(obj, (list, tuple, set, frozenset)):
@@ -35,16 +47,17 @@ def sizeof(obj):
 	return size
 
 
-def is_type(type_class, variable_list):
+def is_type(type_class: type, variable_list: list) -> bool:
 	return all([isinstance(x, type_class) for x in variable_list])
 
 
-def mute_unused(*args, **kwargs):
+def mute_unused(*args, **kwargs): # type: ignore
 	return args, kwargs
 
 
-def formatByteSize(b):
-	j, sizes = 0, ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+def formatByteSize(b: float) -> str:
+	j: int = 0
+	sizes: list[str] = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
 	while True:
 		if b / 1024 > 1.0:
 			b = b / 1024
@@ -60,11 +73,11 @@ class MaxPrioQueue(PriorityQueue):
 
 	# As I dont want to fiddle around with inverting items
 	# while I have other problems at hand
-	def push_nowait(self, item):
+	def push_nowait(self, item: tuple) -> None:
 		"""Same as PriorityQueue.put_nowait()"""
 		return self.put_nowait((-item[0], item[1]))
 
-	def pop_nowait(self):
+	def pop_nowait(self) -> tuple:
 		"""Same as PriorityQueue.get_nowait()"""
 		index, data = self.get_nowait()
 		return -index, data
@@ -104,16 +117,16 @@ class Col:
 	END = '\033[0m'
 
 	@staticmethod
-	def inode(i):
+	def inode(i: object) -> str:
 		"""Green"""
 		return f'{Col.BG}{i}{Col.BW}'
 
 	@staticmethod
-	def path(p):
+	def path(p: object) -> str:
 		"""Yellow"""
 		return f'{Col.BY}{p}{Col.BW}'
 
 	@staticmethod
-	def file(f):
+	def file(f: object) -> str:
 		"""Cyan"""
 		return f'{Col.BC}{f}{Col.BW}'

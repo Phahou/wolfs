@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 
 # suppress 'unused' warnings
+import pyfuse3
 from IPython import embed
+
 embed = embed
 
 import os
-import remote
+from remote import RemoteNode # type: ignore
 import faulthandler
 
 faulthandler.enable()
@@ -17,28 +19,30 @@ log = getLogger(__name__)
 
 from util import formatByteSize, Col, MaxPrioQueue, __functionName__
 from vfsops import VFSOps
-from fileInfo import FileInfo
+from fileInfo import FileInfo, DirInfo
 from errors import NotEnoughSpaceError
 import pickle
+from typing import Any, Final, cast
+from dirent import DirentOps
 
-
-def save_obj(obj, name):
+def save_obj(obj: Any, name: Path) -> None:
 	with open(name, 'wb+') as f:
 		pickle.dump(obj, f, pickle.HIGHEST_PROTOCOL)
 
 
-def load_obj(name):
-	with open(name, 'rb') as f:
+def load_obj(path: Path) -> Any:
+	with open(path, 'rb') as f:
 		return pickle.load(f)
 
 
-class Wolfs(VFSOps):
-	enable_writeback_cache = True
-	enable_acl = True
+class Wolfs(DirentOps):
+	enable_writeback_cache: Final[bool] = True
+	enable_acl: Final[bool] = True
 
-	def __init__(self, node: remote.RemoteNode, sourceDir: str, cacheDir: str,
-				 metadb='', logFile=None, noatime=True, maxCacheSizeMB=VFSOps._DEFAULT_CACHE_SIZE):
-		super().__init__(node, Path(sourceDir), Path(cacheDir), logFile, maxCacheSizeMB, noatime)
+	def __init__(self, node: RemoteNode,
+				 sourceDir: str, cacheDir: str, metadb: str = '', logFile: Path = Path(VFSOps._STDOUT),
+				 noatime: bool = True, maxCacheSizeMB: int = VFSOps._DEFAULT_CACHE_SIZE):
+		super().__init__(node, Path(sourceDir), Path(cacheDir), Path(logFile), maxCacheSizeMB, noatime)
 		# todo / idea:
 		#  - we could use the XDG / freedesktop spec for a the file location of the meta file (~/.config/wolfs/metaFile.db)
 		#  - maybe use same location for config options later on idk (~/.config/wolfs/config.ini)
@@ -60,25 +64,25 @@ class Wolfs(VFSOps):
 		#	# file was corrupted in last run
 		transfer_q = self.populate_inode_maps(self.disk.sourceDir)
 		self.copyRecentFilesIntoCache(transfer_q)
-		save_obj(self.vfs.inode_path_map, metadb)
+		save_obj(self.vfs.inode_path_map, Path(metadb))
 
-	def populate_inode_maps(self, root: str):
+	def populate_inode_maps(self, root: Path) -> MaxPrioQueue:
 		"""
 		index the sourceDir filesystem tree
 		:param root: root directory to add to filesystem to
 		:param self.time_attr decides if mtime or atime is used
 		:return: MaxPrioQueue() with most recently edited / accessed files (atime / mtime)
 		"""
-		assert isinstance(root, str), f"{__functionName__(self)}: root({root}) must be of type str"
+		assert isinstance(root, Path), f"{__functionName__(self)}: root({root}) must be of type str"
 
-		def print_progress(indexedFileNr: int, func_str: int, st_ino: int, path: str):
+		def print_progress(indexedFileNr: int, func_str: str, st_ino: int, path: str) -> int:
 			if indexedFileNr in range(0, 1_000_000, 1_000):
 				log.debug(f'{Col.BY}(#{i}) {Col.BC}{func_str}: {Col.BY}{Col.inode(st_ino)} -> {path}')
 			return i + 1
 
 		transfer_q = MaxPrioQueue()
 
-		def push_to_queue(ino: int, dir_attrs):
+		def push_to_queue(ino: int, dir_attrs: pyfuse3.EntryAttributes) -> None:
 			last_used = getattr(dir_attrs, self.disk.time_attr) // self.disk.__NANOSEC_PER_SEC__
 			transfer_q.push_nowait((last_used, (ino, dir_attrs.st_size)))
 
@@ -92,7 +96,7 @@ class Wolfs(VFSOps):
 			inode_p = self.path_to_ino(dirpath)
 			dir_attrs.st_ino = inode_p
 			# print(inode_p, end=', ')
-			directory = self.vfs.add_Directory(inode_p, dirpath, dir_attrs, [])
+			directory: DirInfo = self.vfs.add_Directory(inode_p, dirpath, dir_attrs, [])
 
 			push_to_queue(inode_p, dir_attrs)
 
@@ -119,17 +123,17 @@ class Wolfs(VFSOps):
 
 		for k, v in self.vfs.inode_path_map.items():
 			assert k == v.entry.st_ino
-			if v.children:
-				self.vfs.inode_path_map[k].children = sorted(v.children)
+			if isinstance(v, DirInfo):
+				self.vfs.inode_path_map[k] = DirInfo(cast(Path, v.src), cast(Path, v.cache), v.entry, sorted(v.children))
 
 		return transfer_q
 
-	def copyRecentFilesIntoCache(self, transfer_q: MaxPrioQueue):
+	def copyRecentFilesIntoCache(self, transfer_q: MaxPrioQueue) -> None:
 		print(f'{Col.B}Transfering files...{Col.END}')
 		while not transfer_q.empty() and not self.disk.isFull(use_threshold=True):
 			timestamp, (inode, file_size) = transfer_q.pop_nowait()
 			info: FileInfo = self.vfs.inode_path_map[inode]
-			path, dst = info.src, info.cache
+			path, dst = cast(Path, info.src), info.cache
 
 			# skip symbolic links for now
 			if os.path.islink(path):
@@ -156,7 +160,7 @@ class Wolfs(VFSOps):
 			f' (used: {usedCache} / {maxCache})'
 		print(copySummary)
 
-	def restoreInternalState(self, metadb: Path):
+	def restoreInternalState(self, metadb: Path) -> None:
 		# load inodes_path_map from meta-data file
 		# if metadb.exists() and metadb.is_file():
 		# ...

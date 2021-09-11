@@ -15,10 +15,13 @@ log = logging.getLogger(__name__)
 from disk import Disk
 from vfs import VFS
 from util import Col, __functionName__
-
+from disk import Path_str
 from IPython import embed
 
 embed = embed
+from typing import TypeVar, Final
+Write_Op = tuple[int, int]
+INVALID_VALUE: Final[int] = -1
 
 
 class File_Ops(Flag):
@@ -28,16 +31,18 @@ class File_Ops(Flag):
 	RENAME = auto()
 	MKDIR = auto()
 
-
 @dataclasses.dataclass
 class LogEntry:
 	op: File_Ops
 	inode: int
 	path: str
-
+	writes: Write_Op = (INVALID_VALUE, INVALID_VALUE)
+	flags: int = INVALID_VALUE
+	mode: int = INVALID_VALUE
+	path_new: str = ""
 
 class Journal:
-	supported_ops = [File_Ops.CREATE, File_Ops.WRITE, File_Ops.UNLINK, File_Ops.MKDIR]
+	supported_ops: Final = [File_Ops.CREATE, File_Ops.WRITE, File_Ops.UNLINK, File_Ops.MKDIR]
 	__EMPTY_FDS = (0, 0)
 
 	def __init__(self, disk: Disk, vfs: VFS, logFile: Path):
@@ -47,18 +52,17 @@ class Journal:
 		self.__history: list[LogEntry] = []
 		self.__inode_dirty_map2: dict[int, bool] = dict()
 		self.__last_remote_path: str = ""
-		self.__last_fds: tuple[int, int] = Journal.__EMPTY_FDS
+		self.__last_fds: Write_Op = Journal.__EMPTY_FDS
 
 	# private api
 	# ===========
 
-	def __fsyncFile_with_remote(self, cache_file: str, write_ops):
+	def __fsyncFile_with_remote(self, cache_file: str, write_ops: list[Write_Op]) -> None:
 		"""
 		Syncs `cache_file` with remote by applying `write_ops` to the corresponding remote file
 		:param cache_file: cached file to be synced
 		:param write_ops: history of write operations to file preceeding last sync
 		"""
-		cache_file = Path(cache_file)
 		remote: Path = self.disk.toSrcPath(cache_file)
 		assert cache_file == self.disk.toCachePath(cache_file), "Tried to overwrite cache with remote file"
 		assert remote.exists(), "Writing before the file was created ???"
@@ -68,7 +72,7 @@ class Journal:
 		if self.__last_remote_path != remote:
 			if self.__last_fds != Journal.__EMPTY_FDS:
 				os.fsync(fd_remote)
-				os.close(fd_cache), os.close(fd_remote)
+				os.close(fd_cache); os.close(fd_remote)
 			cache_flags = os.O_RDONLY | os.O_NOATIME
 			remote_flags = os.O_RDWR | os.O_NOATIME  # | os.O_DIRECT | os.O_SYNC # apparently we get errno.EINVAL with this
 			fd_cache, fd_remote = os.open(cache_file, cache_flags), os.open(remote, remote_flags)
@@ -87,8 +91,8 @@ class Journal:
 		#      and somewhere in the self.__last_remote_path is different
 		Disk.cpAttrs(cache_file, remote)
 
-	def __replayFile_Op(self, op: File_Ops, src_path: Path, logEntry: LogEntry, i: int):
-		def __unlink(src_path: Path):
+	def __replayFile_Op(self, op: File_Ops, src_path: Path, logEntry: LogEntry, i: int) -> int:
+		def __unlink(src_path: Path) -> None:
 			try:
 				os.remove(src_path)
 			except IsADirectoryError:
@@ -97,7 +101,7 @@ class Journal:
 				if '.Trash' in src_path.__str__():
 					log.warning(__functionName__(self, 3) + f"{Col.path(src_path)} not found in Trash -> Ignoring")
 
-		def __mkdir(src_path: Path, logEntry: LogEntry):
+		def __mkdir(src_path: Path, logEntry: LogEntry) -> None:
 			mode: int = getattr(logEntry, 'mode')
 			try:
 				os.mkdir(src_path, mode)
@@ -105,12 +109,12 @@ class Journal:
 				log.error(exc)
 				raise pyfuse3.FUSEError(exc.errno)
 
-		def __create(src_path: Path, logEntry: LogEntry):
+		def __create(src_path: Path, logEntry: LogEntry) -> None:
 			flags: int = getattr(logEntry, 'flags')
 			fd = os.open(src_path, flags)
 			os.close(fd)
 
-		def __rename(src_path: Path, logEntry: LogEntry):
+		def __rename(src_path: Path, logEntry: LogEntry) -> None:
 			path_new: Path = self.disk.toSrcPath(getattr(logEntry, 'path_new'))
 			os.rename(src_path, path_new)
 			self.vfs.inode_path_map[logEntry.inode].src = path_new
@@ -123,11 +127,11 @@ class Journal:
 		}
 		if op == File_Ops.WRITE:
 			# fetch all writes happening directly after this one
-			writes: list[int, int] = []
-			logpath = logEntry.path
+			writes: list[Write_Op] = []
+			file_path = logEntry.path
 			history_iter = iter(self.__history[i:])
 			while writeEntry := next(history_iter, None):
-				if writeEntry.op != File_Ops.WRITE or writeEntry.path != logpath:
+				if writeEntry.op != File_Ops.WRITE or writeEntry.path != file_path:
 					break
 				else:
 					writes.append(getattr(writeEntry, 'writes'))
@@ -138,13 +142,13 @@ class Journal:
 			switcher[op](src_path, logEntry, i)
 			return i + 1
 
-	def __markDirty(self, inode: int):
+	def __markDirty(self, inode: int) -> None:
 		self.__inode_dirty_map2[inode] = True
 
 	# util funcs
 	# ==========
 
-	def flushCompleteJournal(self):
+	def flushCompleteJournal(self) -> None:
 		# empty out unneeded ops if inodes was deleted unlinked entries
 		# Doesnt sort out rewrites of files under a different inode, read / writes will be ok though
 
@@ -181,9 +185,9 @@ class Journal:
 		self.__last_fds = Journal.__EMPTY_FDS
 		self.__last_remote_path = ""
 
-	def getDirtyPaths(self):
-		dirty_paths = []
-		write_ops_reserved_size = 0
+	def getDirtyPaths(self) -> tuple[list[Path], int]:
+		dirty_paths: list[Path] = []
+		write_ops_reserved_size: int = 0
 		for logEntry in self.__history:
 			if logEntry.op != File_Ops.WRITE:
 				continue
@@ -192,51 +196,50 @@ class Journal:
 			write_ops_reserved_size += bytes_written
 		return dirty_paths, write_ops_reserved_size
 
-	def isDirty(self, inode: int):
+	def isDirty(self, inode: int) -> bool:
 		return inode in self.__inode_dirty_map2
 
-	def isCompletelyClean(self):
+	def isCompletelyClean(self) -> bool:
 		return self.__inode_dirty_map2 == {}
 
 	# public api
 	# ==========
 
-	def create(self, inode: int, path, flags):
+	def create(self, inode: int, path: str, flags: int) -> None:
 		self.__markDirty(inode)
 		e: LogEntry = LogEntry(File_Ops.CREATE, inode, path)
 		e.flags = flags
 		self.__history.append(e)
 
-	def write(self, inode: int, offset: int, bytes_written: int):
+	def write(self, inode: int, offset: int, bytes_written: int) -> None:
 		self.__markDirty(inode)
 		e: LogEntry = LogEntry(File_Ops.WRITE, inode, self.vfs.inode_to_cpath(inode).__str__())
 		e.writes = (offset, bytes_written)
 		self.__history.append(e)
 
-	def flush(self, inode, fh):
+	def flush(self, inode: int, fh: int) -> None:
 		# TODO: sync up later (timer would probably be the best choice or
 		#  		some kind of check if there is almost no space available on underlying cache disk)
 		# special case if we enable renaming things:
 		# log.warning(f'{__functionName__(self, 2)} Not implemented')
 		pass
 
-	def rename(self, inode, path_old, path_new):
+	def rename(self, inode: int, path_old: str, path_new: str) -> None:
 		self.__markDirty(inode)
-
 		e: LogEntry = LogEntry(File_Ops.RENAME, inode, path_old)
 		e.path_new = path_new
 		self.__history.append(e)
 
-	def unlink(self, inode: int, path: str):
+	def unlink(self, inode: int, path: str) -> None:
 		self.__markDirty(inode)
 		e: LogEntry = LogEntry(File_Ops.UNLINK, inode, path)
 		self.__history.append(e)
 
-	def rmdir(self, inode, path: str):
+	def rmdir(self, inode: int, path: str) -> None:
 		# same as unlink of a file as non empty dirs would already have raised an error
 		self.unlink(inode, path)
 
-	def mkdir(self, inode: int, path: str, mode: int):
+	def mkdir(self, inode: int, path: str, mode: int) -> None:
 		self.__markDirty(inode)
 		e: LogEntry = LogEntry(File_Ops.MKDIR, 0, path)
 		e.mode = mode

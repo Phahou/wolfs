@@ -1,4 +1,7 @@
 #!/usr/bin/python3
+
+# type: ignore
+
 from wakeonlan import send_magic_packet
 from icmplib import ping
 import trio
