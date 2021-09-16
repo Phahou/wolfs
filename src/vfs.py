@@ -86,7 +86,7 @@ class VFS:
 
 		if isinstance(val, set):
 			val = next(iter(val))  # In case of hardlinks, pick any path
-		return Path(val)
+		return val
 
 	def get_FileInfo(self, inode: int) -> FileInfo:
 		return self.inode_path_map[inode]

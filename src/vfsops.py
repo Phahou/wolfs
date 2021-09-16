@@ -47,9 +47,17 @@ class VFSOps(pyfuse3.Operations):
 	def path_to_ino(self, some_path: Path_str) -> int:
 		return self.disk.path_to_ino(some_path)
 
+	def printAllInodes(self, inode_p=Disk.ROOT_INODE) -> None:
+		item = self.vfs.inode_path_map[inode_p]
+		if isinstance(item, DirInfo):
+			print(f"{inode_p}: {item.children}")
+			for ino in item.children:
+				self.printAllInodes(ino)
+
 	async def statfs(self, ctx: pyfuse3.RequestContext) -> pyfuse3.StatvfsData:
 		"""Easisest function to get a entrypoint into the code (not many df calls all around)"""
 		root_ino = self.mnt_ino_translation(pyfuse3.ROOT_INODE)
+		self.printAllInodes()
 		root = self.vfs.inode_to_cpath(root_ino)
 		stat_ = pyfuse3.StatvfsData()
 		try:
@@ -97,7 +105,7 @@ class VFSOps(pyfuse3.Operations):
 
 	def _forget_path(self, inode: int, path: str) -> None:
 		# gets called internally so no translation
-		log.debug(f'{__functionName__(self)} {Col.path(path)} for {Col.inode(inode)}')
+		log.debug(f'{__functionName__(self)} {Col.path(path)} as ino {Col.inode(inode)}')
 		val = self.vfs.inode_to_cpath(inode)
 		if isinstance(val, set):
 			val.remove(path)
@@ -153,8 +161,7 @@ class VFSOps(pyfuse3.Operations):
 	async def getattr(self, inode: int, ctx: pyfuse3.RequestContext = None) -> pyfuse3.EntryAttributes:
 		inode_untranslated = inode
 		inode = self.mnt_ino_translation(inode_untranslated)
-		log.info(f'{__functionName__(self)} for {Col.inode(inode)}(translated from: {Col.inode(inode_untranslated)})')
-		if self.disk.in_cache.get(inode)
+		#log.info(f'{__functionName__(self)} in {Col.inode(inode)} (translated from: {Col.inode(inode_untranslated)})')
 		entry = await self.vfs.getattr(inode, ctx)
 		path = self.vfs.inode_to_cpath(inode)
 		entry.st_ino = self.path_to_ino(path)
@@ -244,7 +251,7 @@ class VFSOps(pyfuse3.Operations):
 
 		# add to new parent
 		new_children.append(ino_old)
-		self.disk.track(path_new)
+		self.disk.track(path_new, reuse_ino=ino_old)
 
 		info_ino_old: DirInfo = cast(DirInfo, inoPathMap[ino_old])
 		# move FileInfo to new inode. Journal changes src if synced
@@ -267,7 +274,7 @@ class VFSOps(pyfuse3.Operations):
 		if self.vfs.already_open(inode):
 			fd: int = self.vfs._inode_fd_map[inode]
 			self.vfs._fd_open_count[fd] += 1
-			log.info(__functionName__(self), f" (fd, inode): ({fd}, {Col.inode(inode)})")
+			# log.info(__functionName__(self) + f" (fd, inode): ({fd}, {Col.inode(inode)})")
 			return pyfuse3.FileInfo(fh=fd)
 
 		# disable creation handling here
@@ -293,29 +300,29 @@ class VFSOps(pyfuse3.Operations):
 
 	async def create(self, inode_p: int, name: str, mode: int, flags: int, ctx: pyfuse3.RequestContext) -> tuple[pyfuse3.FileInfo, pyfuse3.EntryAttributes]:
 		inode_p = self.mnt_ino_translation(inode_p)
-		path: str = os.path.join(self.vfs.inode_to_cpath(inode_p), fsdecode(name))
-		log.debug(__functionName__(self) + ' ' + Col.file(path) + ' in ' + Col.inode(inode_p) + Col.END)
+		cpath: str = os.path.join(self.vfs.inode_to_cpath(inode_p), fsdecode(name))
+		log.debug(__functionName__(self) + ' ' + Col.file(cpath) + ' in ' + Col.inode(inode_p) + Col.END)
 		try:
-			fd: int = os.open(path, flags | os.O_CREAT | os.O_TRUNC)
+			fd: int = os.open(cpath, flags | os.O_CREAT | os.O_TRUNC)
 		except OSError as exc:
 			raise FUSEError(exc.errno)
 		attr = FileInfo.getattr(fd=fd)
-		attr.st_ino = self.path_to_ino(path)
-		self.vfs.addFilePath(inode_p, attr.st_ino, path, attr)
-		self.disk.track(path, force=True)
+		attr.st_ino = self.disk.track(cpath.__str__())
+		self.vfs.addFilePath(inode_p, attr.st_ino, cpath, attr)
 
 		self.vfs._inode_fd_map[attr.st_ino] = fd
 		self.vfs._fd_inode_map[fd] = attr.st_ino
 		self.vfs._fd_open_count[fd] = 1
-		self.journal.create(attr.st_ino, path, flags | os.O_CREAT | os.O_TRUNC)
+		self.journal.create(attr.st_ino, cpath, flags | os.O_CREAT | os.O_TRUNC)
 		# TODO: check if the same
 		f: pyfuse3.FileInfo = pyfuse3.FileInfo(fh=fd)
 		return f, attr
 
 	def __unlink_inode_in_parent_directory(self, inode_p: int, inode: int, path: str) -> None:
+		# inode from /tmp might not be present here anymore but file isnt deleted in src
 		info_p: DirInfo = cast(DirInfo, self.vfs.inode_path_map[inode_p])
 		assert isinstance(info_p, DirInfo), "Type mismatch"
-		assert inode in info_p.children, f"{inode} not in {info_p.children}"
+		assert inode in info_p.children, f"{inode} not in {info_p.children}, path {path}"
 		info_p.children.remove(inode)
 		self.disk.untrack(path)
 

@@ -119,15 +119,22 @@ class Disk:
 	def mnt_ino_translation(self, inode: int) -> int:
 		return inode if inode != pyfuse3.ROOT_INODE else self.ROOT_INODE
 
-	def path_to_ino(self, some_path: Path_str) -> int:
-		"""Maps paths to inodes. Creates them if necessary"""
+	def path_to_ino(self, some_path: Path_str, reuse_ino=0) -> int:
+		"""
+		Maps paths to inodes. Creates them if necessary
+		re-uses ino `reuse_ino` if != 0
+		"""
 		path: str = self.toRootPath(some_path)
 
 		if ino := self.path_ino_map.get(path):
 			ino = ino
-		elif self.__freed_inos:
-			ino = self.__freed_inos[0]
-			del self.__freed_inos[0]
+		# completely unused currently
+		#elif self.__freed_inos:
+		#	ino = self.__freed_inos[0]
+		#	del self.__freed_inos[0]
+		#	print(f"{__functionName__(self)} ino from deleted self.__freed_inos[0]:{ino}")
+		elif reuse_ino != 0:  # for rename operations
+			ino = reuse_ino
 		else:
 			ino = self.__last_ino + 1
 			self.__last_ino += 1
@@ -142,17 +149,18 @@ class Disk:
 		return ino
 
 	@staticmethod
-	def cpdir(src: Path, dst: Path, added_size: int = 0) -> int:
+	def cpdir(src: Path, dst: Path, added_folders: list[Path] = [], added_size: int = 0) -> tuple[int, list[Path]]:
 		"""creates a dir  `dst` and all its missing parents. Copies attrs of `src` and its parents accordingly"""
 		if not dst.exists():
 			if not dst.parent.exists():
-				added_size += Disk.cpdir(src.parent, dst.parent)
+				tmp_size, added_folders = Disk.cpdir(src.parent, dst.parent, added_folders + [src.parent])
+				added_size += tmp_size
 			stat_result = os.stat(src)
 			mode = stat_result.st_mode
 			added_size += stat_result.st_size
 			dst.mkdir(mode=mode, parents=False)
 		shutil.copystat(src, dst)
-		return added_size
+		return added_size, added_folders
 
 	@staticmethod
 	def getSize(path: str = '.') -> int:
@@ -174,15 +182,16 @@ class Disk:
 	def canStore(self, path: Path) -> bool:
 		return self.__canStore(path)
 
-	def __canStore(self, path: Path) -> bool:
+	def __canStore(self, path: Union[FileInfo, Path, str]) -> bool:
 		"""
 		Does the cache have room  for `path` ?
 		Cache size needs to be updated if file is inserted into cacheDir.
 		:param path: returns False on symbolic links
 		"""
 		if isinstance(path, FileInfo):
-			store_able = not os.path.islink(
-				path.cache) and path.entry.st_size + self.__current_CacheSize < self.__maxCacheSize
+			assert not isinstance(path.cache, set), f"{__functionName__(self)} sets(softlinks) are currently not implemented{Col.END}"
+			store_able = not os.path.islink(path.cache)\
+						 and ((path.entry.st_size + self.__current_CacheSize) < self.__maxCacheSize)
 		elif isinstance(path, Path) or isinstance(path, str):
 			# TODO: maybe try to get filesize via lstat (like stat but supports links)
 			p = path.__str__() if isinstance(path, Path) else path
@@ -204,35 +213,78 @@ class Disk:
 		return self.isFilledBy(1.0)
 
 	def untrack(self, path: str) -> None:
-		"""Doesnt track `path` anymore and frees up its reserved size"""
+		"""Doesnt track `path` anymore and frees up its reserved size."""
 		src_path: str = self.toSrcPath(path).__str__()
 		if timestamp := self.path_timestamp.get(src_path):
-			(t_path, size) = self.in_cache[timestamp]
-			self.__current_CacheSize -= size
-			del self.in_cache[timestamp]
-			del self.path_timestamp[src_path]
-			del self.__cached_inos[self.path_to_ino(src_path)]
+			try:
+				i: int = 0
+				item: Union[tuple[str, int], list[tuple[str, int]]] = self.in_cache[timestamp]
+				if isinstance(item, list):
+					i = [y[0] for y in item].index(src_path)
+					item = item[i]
 
-	def track(self, path: Path, force: bool = False) -> None:
-		assert self.sourceDir.__str__() in path.__str__(), \
-			f'Path: {path} should only have prefixes of {self.sourceDir.__str__()}'
+				(t_path, size) = item[0], item[1]
+				self.__current_CacheSize -= size
 
-		timestamp: int = time.time_ns() if force else getattr(os.stat(path), self.time_attr) // self.__NANOSEC_PER_SEC__
-		size: int = os.path.getsize(path)
-		self.in_cache[timestamp] = (path, size)
-		self.path_timestamp[path.__str__()] = timestamp
-		self.__cached_inos[self.path_to_ino(path.__str__())] = True
+				if isinstance(item, list):
+					del self.in_cache[timestamp][i]
+					if len(self.in_cache) == 0:
+						del self.in_cache[timestamp]
+				else:
+					del self.in_cache[timestamp]
+
+				del self.path_timestamp[src_path]
+				del self.__cached_inos[self.path_to_ino(src_path)]
+			except KeyError:
+				pass
+				#embed()
+			self.old_src_path = src_path
+
+	def track(self, path: str, force: bool = False, reuse_ino=0) -> int:
+		"""
+		Add `path` to internal filing structure and reserve it's disk space
+		reuse_ino: re-use an old inode
+		"""
+
+		# handling of create and mkdir (files dont exist yet so os.stat(path_) will throw an error)
+		path_: str = self.toSrcPath(path).__str__()
+		if not os.path.exists(path_):
+			path_ = self.toCachePath(path).__str__()
+
+		timestamp: int = getattr(os.stat(path_), self.time_attr) // self.__NANOSEC_PER_SEC__
+		size: int = os.path.getsize(path_)
+		src_path: str = self.toSrcPath(path).__str__()
+		ino: int = self.path_to_ino(src_path, reuse_ino=reuse_ino)
+		tracked_path = self.in_cache.get(timestamp)
+		assert isinstance(tracked_path, list) or isinstance(tracked_path, tuple) or tracked_path is None, "Type mismatch!"
+		if isinstance(self.in_cache.get(timestamp), list):
+			self.in_cache[timestamp].append((src_path, size))
+		elif isinstance(tracked_path, tuple):
+			self.in_cache[timestamp] = [self.in_cache[timestamp]] + [(src_path, size)]
+		else:
+			self.in_cache[timestamp] = (src_path, size)
+		self.path_timestamp[src_path] = timestamp
+		self.__cached_inos[ino] = True
 		self.__current_CacheSize += size
+		return ino
+
+	def get_head_in_cache(self) -> tuple[str, int]:
+		item: Union[tuple[str, int], list[tuple[str, int]]] = self.in_cache.peekitem(index=0)[1]
+		if isinstance(item, list):
+			item = item[0]
+		src_path, size = item[0], item[1]
+		return src_path, size
+
 
 	def __make_room_for_path(self, force: bool, path: Path, open_paths: list[Path] = None) -> None:
 		if open_paths is None:
 			open_paths = []
 		while force and not self.__canStore(path):
 			try:
-				timestamp, (src_path, size) = self.in_cache.get(index=0)
-				assert timestamp in self.path_timestamp
+				(src_path, size) = self.get_head_in_cache()
+				#assert timestamp in self.path_timestamp
 				self.untrack(src_path)
-			except KeyError:
+			except IndexError:
 				log.warning(f"Deleted all non open files and still couldn't store file: {path}")
 				raise FUSEError(errno.EDQUOT)
 
@@ -278,11 +330,16 @@ class Disk:
 
 		if self.__canStore(path):
 			dest = self.toCachePath(path)
-			addedDirsSize = Disk._cp2Dir(path, dest)
-			if addedDirsSize != 0:
-				self.path_to_ino(dest)
-				self.track(path, force)
+			addedDirsSize, addedFolders = Disk._cp2Dir(path, dest)
 			self.__current_CacheSize += addedDirsSize
+			# folders which are created by cp2Dir are untracked and should be tracked...
+			# elements in cache doesnt model reality (too few entries too many undocumented)
+			for parent in addedFolders:
+				self.path_to_ino(parent)
+				self.track(parent.__str__(), force)
+			if addedDirsSize == 0:
+				self.path_to_ino(dest)
+				self.track(path.__str__(), force)
 
 			# TODO: use xattributes later and make a custom field:
 			# sth like __wolfs_atime__ : time.time_ns()
@@ -294,7 +351,7 @@ class Disk:
 			raise NotEnoughSpaceError('Not enough space')
 
 	@staticmethod
-	def _cp2Dir(src: Path_str, dst: Path_str) -> int:
+	def _cp2Dir(src: Path_str, dst: Path_str) -> tuple[int, list[Path]]:
 		"""
 		Create a copy of `src` in `dst` while also keeping meta-data.
 		Creates parent directories on the fly.
@@ -305,18 +362,19 @@ class Disk:
 		:returns: Path of copied file in cacheDir
 		"""
 		src, dst = Path(src), Path(dst)
-		addedDirsSize = 0
+		addedDirsSize: int = 0
+		addedFolders: list[Path] = []
 		if src == dst:
 			# same File no need for copying,
 			# file should exist already too as self.__canStore would throw errors otherwise
 			# just give 0 back as we effictively wont do anything and just skip it
-			return 0
+			return 0, []
 
 		if src.is_dir():
-			addedDirsSize = Disk.cpdir(src, dst)
+			addedDirsSize, addedFolders = Disk.cpdir(src, dst)
 		elif src.is_file():
 			if not dst.parent.exists():
-				addedDirsSize = Disk.cpdir(src.parent, dst.parent)
+				addedDirsSize, addedFolders = Disk.cpdir(src.parent, dst.parent)
 			shutil.copy2(src, dst)
 		else:
 			msg = f'{Col.BY} Unrecognized filetype: {src} -> ignoring'
@@ -324,7 +382,7 @@ class Disk:
 			raise IOError(msg)
 
 		Disk.cpAttrs(src, dst)
-		return addedDirsSize
+		return addedDirsSize, addedFolders
 
 	@staticmethod
 	def cpAttrs(src: Path_str, dst: Path_str) -> None:

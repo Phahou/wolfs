@@ -16,6 +16,7 @@ from util import __functionName__
 class DirentOps(VFSOps):
 
 	async def mkdir(self, inode_p: int, name: str, mode: int, ctx: pyfuse3.RequestContext) -> pyfuse3.EntryAttributes:
+		raise FUSEError(errno.ENOSYS)
 		log.info(
 			__functionName__(
 				self) + f" {Col.file(name)} in {Col.inode(inode_p)} with mode {Col.file(mode & ctx.umask)}")
@@ -30,8 +31,7 @@ class DirentOps(VFSOps):
 		except OSError as exc:
 			raise FUSEError(exc.errno)
 		attr = FileInfo.getattr(path=path)
-		attr.st_ino = self.path_to_ino(path)
-		self.disk.track(path)
+		attr.st_ino = self.disk.track(path)
 		self.vfs.addFilePath(inode_p, attr.st_ino, path, attr)
 		self.journal.mkdir(attr.st_ino, path, mode)
 		return attr

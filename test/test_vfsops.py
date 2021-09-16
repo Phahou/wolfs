@@ -43,6 +43,7 @@ def checked_unlink(filename, path, isdir=False):
 
 def prep_write():
 	name = os.path.join(MNT_DIR, name_generator())
+	time.sleep(random.random())
 	shutil.copyfile(TEST_FILE, name)
 	os.statvfs(MNT_DIR)  # force flush
 	return name
@@ -58,7 +59,7 @@ def test_write():
 	name = prep_write()
 	assert filecmp.cmp(name, TEST_FILE, False)
 	assert filecmp.cmp(name.replace(REMOTE, DATA_DIR), TEST_FILE)
-	checked_unlink(name, MNT_DIR)
+	#checked_unlink(name, MNT_DIR)
 
 def test_rename_fail_File2Dir():
 	"""Test for renameing a file. Contains write, rename, unlink"""
@@ -70,11 +71,11 @@ def test_rename_fail_File2Dir():
 		os.rename(name, dest)
 
 	assert exc_info.value.errno == errno.ENOTDIR, f'As {dest} is a dir and {name} is not this should have failed'
-	checked_unlink(name, dest)
+	#checked_unlink(name, dest)
 
-def test_rename_File2File():
+def test_rename_File2File_same_directory():
 	name = prep_write()
-	dest = os.path.join(MNT_DIR, 'test/' + name_generator())
+	dest = os.path.join(MNT_DIR, name_generator())
 	os.rename(name, dest)
 	assert os.path.exists(dest), f'As we simply renamed {name} -> {dest}'
 

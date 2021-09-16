@@ -64,7 +64,14 @@ class Journal:
 		:param write_ops: history of write operations to file preceeding last sync
 		"""
 		remote: Path = self.disk.toSrcPath(cache_file)
-		assert cache_file == self.disk.toCachePath(cache_file), "Tried to overwrite cache with remote file"
+		if cache_file != self.disk.toCachePath(cache_file):
+			c = LogEntry(op=File_Ops.CREATE, inode=0, path=cache_file)
+			for entry in self.__history:
+				if entry.path == cache_file.__str__():
+					if entry.op == File_Ops.CREATE:
+						break
+					elif entry.op == File_Ops.WRITE:
+						assert "Tried to overwrite cache with remote file"
 		assert remote.exists(), "Writing before the file was created ???"
 
 		fd_cache, fd_remote = self.__last_fds
@@ -207,7 +214,7 @@ class Journal:
 
 	def create(self, inode: int, path: str, flags: int) -> None:
 		self.__markDirty(inode)
-		e: LogEntry = LogEntry(File_Ops.CREATE, inode, path)
+		e: LogEntry = LogEntry(File_Ops.CREATE, inode, self.disk.toCachePath(path).__str__())
 		e.flags = flags
 		self.__history.append(e)
 
