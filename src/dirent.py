@@ -40,6 +40,7 @@ class DirentOps(VFSOps):
 		# TODO: log on success
 		#       die.net: Upon successful completion, the rmdir() function shall mark for update the st_ctime and st_mtime fields of the parent directory.
 		#       -> update entries
+		raise FUSEError(errno.ENOSYS)
 		inode_p = self.mnt_ino_translation(inode_p)
 
 		name = fsdecode(name)

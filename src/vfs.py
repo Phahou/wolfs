@@ -170,63 +170,11 @@ class VFS:
 	# ============
 
 	async def setattr(self, inode: int, attr: pyfuse3.EntryAttributes, fields: pyfuse3.SetattrFields, fh: int, ctx: pyfuse3.RequestContext) -> pyfuse3.EntryAttributes:
-		# We use the f* functions if possible so that we can handle
-		# a setattr() call for an inode without associated directory
-		# handle.
 		if fh is None:
 			path_or_fh = self.inode_to_cpath(inode)
-			truncate = os.truncate
-			chmod = os.chmod
-			chown: Any = os.chown
-			stat = os.lstat
 		else:
 			path_or_fh = fh
-			truncate = os.ftruncate
-			chmod = os.fchmod
-			chown = os.fchown
-			stat = os.fstat
-
-		try:
-			if fields.update_size:
-				truncate(path_or_fh, attr.st_size)
-
-			if fields.update_mode:
-				# Under Linux, chmod always resolves symlinks so we should
-				# actually never get a setattr() request for a symbolic
-				# link.
-				assert not stat_m.S_ISLNK(attr.st_mode)
-				chmod(path_or_fh, stat_m.S_IMODE(attr.st_mode))
-
-			if fields.update_uid:
-				chown(path_or_fh, attr.st_uid, -1, follow_symlinks=False)
-
-			if fields.update_gid:
-				chown(path_or_fh, -1, attr.st_gid, follow_symlinks=False)
-
-			if fields.update_atime and fields.update_mtime:
-				if fh is None:
-					os.utime(path_or_fh, None, follow_symlinks=False,
-							 ns=(attr.st_atime_ns, attr.st_mtime_ns))
-				else:
-					os.utime(path_or_fh, None,
-							 ns=(attr.st_atime_ns, attr.st_mtime_ns))
-			elif fields.update_atime or fields.update_mtime:
-				# We can only set both values, so we first need to retrieve the
-				# one that we shouldn't be changing.
-				oldstat = stat(path_or_fh)
-				if not fields.update_atime:
-					attr.st_atime_ns = oldstat.st_atime_ns
-				else:
-					attr.st_mtime_ns = oldstat.st_mtime_ns
-				if fh is None:
-					os.utime(path_or_fh, None, follow_symlinks=False,
-							 ns=(attr.st_atime_ns, attr.st_mtime_ns))
-				else:
-					os.utime(path_or_fh, None,
-							 ns=(attr.st_atime_ns, attr.st_mtime_ns))
-
-		except OSError as exc:
-			raise FUSEError(exc.errno)
+		FileInfo.setattr(attr, fields, path_or_fh, ctx)
 
 		return await self.getattr(inode)
 

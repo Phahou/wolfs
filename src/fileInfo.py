@@ -1,7 +1,10 @@
 import os
 from pathlib import Path
+
+import pyfuse3
 from pyfuse3 import FUSEError, EntryAttributes
-from typing import Union, Optional
+from typing import Union, Optional, Any
+import stat as stat_m
 
 class FileInfo:
 
@@ -44,6 +47,65 @@ class FileInfo:
 		entry.st_blocks = ((entry.st_size + entry.st_blksize - 1) // entry.st_blksize)
 
 		return entry
+
+	@staticmethod
+	def setattr(attr: pyfuse3.EntryAttributes, fields: pyfuse3.SetattrFields, path_or_fh: Union[Path, int], ctx: pyfuse3.RequestContext) -> None:
+		# We use the f* functions if possible so that we can handle
+		# a setattr() call for an inode without associated directory
+		# handle.
+		fh_isPath = isinstance(path_or_fh, Path)
+		if fh_isPath:
+			truncate = os.truncate
+			chmod = os.chmod
+			chown: Any = os.chown
+			stat = os.lstat
+		else:
+			truncate = os.ftruncate
+			chmod = os.fchmod
+			chown = os.fchown
+			stat = os.fstat
+		try:
+			if fields.update_size:
+				truncate(path_or_fh, attr.st_size)
+
+			if fields.update_mode:
+				# Under Linux, chmod always resolves symlinks so we should
+				# actually never get a setattr() request for a symbolic
+				# link.
+				assert not stat_m.S_ISLNK(attr.st_mode)
+				chmod(path_or_fh, stat_m.S_IMODE(attr.st_mode))
+
+			if fields.update_uid:
+				chown(path_or_fh, attr.st_uid, -1, follow_symlinks=False)
+
+			if fields.update_gid:
+				chown(path_or_fh, -1, attr.st_gid, follow_symlinks=False)
+
+			if fields.update_atime and fields.update_mtime:
+				if fh_isPath:
+					os.utime(path_or_fh, None, follow_symlinks=False,
+							 ns=(attr.st_atime_ns, attr.st_mtime_ns))
+				else:
+					os.utime(path_or_fh, None,
+							 ns=(attr.st_atime_ns, attr.st_mtime_ns))
+			elif fields.update_atime or fields.update_mtime:
+				# We can only set both values, so we first need to retrieve the
+				# one that we shouldn't be changing.
+				oldstat = stat(path_or_fh)
+				if not fields.update_atime:
+					attr.st_atime_ns = oldstat.st_atime_ns
+				else:
+					attr.st_mtime_ns = oldstat.st_mtime_ns
+				if fh_isPath:
+					os.utime(path_or_fh, None, follow_symlinks=False,
+							 ns=(attr.st_atime_ns, attr.st_mtime_ns))
+				else:
+					os.utime(path_or_fh, None,
+							 ns=(attr.st_atime_ns, attr.st_mtime_ns))
+
+		except OSError as exc:
+			raise FUSEError(exc.errno)
+
 
 class DirInfo(FileInfo):
 	def __init__(self, src: Path, cache: Path, fileAttrs: EntryAttributes, child_inodes: list[int]) -> None:

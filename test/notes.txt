@@ -1,0 +1,9 @@
+testing order:
+1. disk
+2. vfs
+3. journal (needs disk and vfs)
+if this is all tested we should have a pretty good foundation
+
+won't be tested:
+ - errors
+ - util

@@ -50,7 +50,7 @@ class VFSOps(pyfuse3.Operations):
 	def printAllInodes(self, inode_p=Disk.ROOT_INODE) -> None:
 		item = self.vfs.inode_path_map[inode_p]
 		if isinstance(item, DirInfo):
-			print(f"{inode_p}: {item.children}")
+			log.debug(f"		{__functionName__(self, 2)} {inode_p}: {item.children}")
 			for ino in item.children:
 				self.printAllInodes(ino)
 
@@ -175,7 +175,7 @@ class VFSOps(pyfuse3.Operations):
 		Strategry used is to discard the Least recently used files
 		:raise pyfuse3.FUSEError  with errno set to according error
 		"""
-		assert not os.path.islink(f), "open()-syscalls are only bound to files as opendir() exists!"
+		assert not os.path.islink(f), "Symbolic links are currently illegal / not implemented!"
 
 		# in case the file is bigger than the whole cache size (likely on small cache sizes)
 		log.info(f"{__functionName__(self)} {Col.file(f)}")
@@ -289,6 +289,9 @@ class VFSOps(pyfuse3.Operations):
 			attr = FileInfo.getattr(f)
 			attr.st_ino = inode
 			info.entry = attr
+		except KeyError:
+			log.error(f"{__functionName__(self)}({inode}, {hex(flags)})")
+			raise FUSEError(errno.ENOENT)
 		except OSError as exc:
 			raise FUSEError(exc.errno)
 
@@ -401,6 +404,7 @@ class VFSOps(pyfuse3.Operations):
 		inode = self.vfs._fd_inode_map[fd]
 		del self.vfs._inode_fd_map[inode]
 		del self.vfs._fd_inode_map[fd]
+		log.debug(f"{__functionName__(self)} fd: {fd} ino: {inode}")
 		try:
 			os.close(fd)
 		except OSError as exc:

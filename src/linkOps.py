@@ -1,36 +1,13 @@
 import errno
-
 from pyfuse3 import FUSEError, RequestContext, EntryAttributes
-from vfsops import VFSOps
 from os import fsencode, fsdecode
 import os
 from pathlib import Path
+from xattrs import XAttrsOps
 
 # pretty much only dead code for now but it will be used later on when the file system is a bit more
 # stable and needs  for example the extended xattrs funcs
-class AdditionalOps(VFSOps):
-
-	async def access(self, inode: int, mode: int, ctx: RequestContext) -> None:
-		# for permissions but eh
-		raise FUSEError(errno.ENOSYS)
-
-	# xattr methods
-	# =============
-
-	async def setxattr(self, inode: int, name: str, value: str, ctx: RequestContext) -> None:
-		raise FUSEError(errno.ENOSYS)
-
-	async def getxattr(self, inode: int, name: str, ctx: RequestContext) -> None:
-		raise FUSEError(errno.ENOSYS)
-
-	async def listxattr(self, inode: int, ctx: RequestContext) -> None:
-		raise FUSEError(errno.ENOSYS)
-
-	async def removexattr(self, inode: int, name: str, ctx: RequestContext) -> None:
-		raise FUSEError(errno.ENOSYS)
-
-	# =====================================================================================================================
-
+class AdditionalOps(XAttrsOps):
 	# link methods (do not use)
 	# =========================
 

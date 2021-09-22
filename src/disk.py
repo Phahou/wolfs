@@ -1,7 +1,6 @@
 #!/usr/bin/python
 
 # suppress 'unused' warnings
-import typing
 
 from IPython import embed
 
@@ -13,7 +12,6 @@ import errno
 import sys
 import os
 from util import Col, formatByteSize
-import time
 import logging
 import pyfuse3
 from pyfuse3 import FUSEError
@@ -22,7 +20,6 @@ from util import __functionName__
 from errors import NotEnoughSpaceError
 from typing import Union
 from sortedcontainers import SortedDict
-import functools
 from typing import Final
 
 log = logging.getLogger(__name__)
@@ -149,8 +146,10 @@ class Disk:
 		return ino
 
 	@staticmethod
-	def cpdir(src: Path, dst: Path, added_folders: list[Path] = [], added_size: int = 0) -> tuple[int, list[Path]]:
+	def cpdir(src: Path, dst: Path, added_folders=None, added_size: int = 0) -> tuple[int, list[Path]]:
 		"""creates a dir  `dst` and all its missing parents. Copies attrs of `src` and its parents accordingly"""
+		if added_folders is None:
+			added_folders = []
 		if not dst.exists():
 			if not dst.parent.exists():
 				tmp_size, added_folders = Disk.cpdir(src.parent, dst.parent, added_folders + [src.parent])
@@ -189,7 +188,8 @@ class Disk:
 		:param path: returns False on symbolic links
 		"""
 		if isinstance(path, FileInfo):
-			assert not isinstance(path.cache, set), f"{__functionName__(self)} sets(softlinks) are currently not implemented{Col.END}"
+			assert not isinstance(path.cache, set),\
+				f"{__functionName__(self)} sets(softlinks) are currently not implemented{Col.END}"
 			store_able = not os.path.islink(path.cache)\
 						 and ((path.entry.st_size + self.__current_CacheSize) < self.__maxCacheSize)
 		elif isinstance(path, Path) or isinstance(path, str):
@@ -203,7 +203,7 @@ class Disk:
 
 	def isFilledBy(self, percent: float) -> bool:
 		""":param percent: between [0.0, 1.0]"""
-		assert 0.0 < percent < 1.0, 'disk_isFullBy: needs to be [0-1]'
+		assert 0.0 <= percent <= 1.0, 'disk_isFullBy: needs to be [0-1]'
 		diskUsage = self.__current_CacheSize / self.__maxCacheSize
 		return True if diskUsage >= percent else False
 
@@ -218,20 +218,23 @@ class Disk:
 		if timestamp := self.path_timestamp.get(src_path):
 			try:
 				i: int = 0
-				item: Union[tuple[str, int], list[tuple[str, int]]] = self.in_cache[timestamp]
-				if isinstance(item, list):
-					i = [y[0] for y in item].index(src_path)
-					item = item[i]
 
+				# assign references for a bit of a speedup
+				in_cache = self.in_cache
+				og_item: Union[tuple[str, int], list[tuple[str, int]]] = in_cache[timestamp]
+				item = og_item
+				if isinstance(og_item, list):
+					i = [y[0] for y in og_item].index(src_path)
+					item = og_item[i]
 				(t_path, size) = item[0], item[1]
 				self.__current_CacheSize -= size
 
-				if isinstance(item, list):
-					del self.in_cache[timestamp][i]
-					if len(self.in_cache) == 0:
-						del self.in_cache[timestamp]
+				if isinstance(og_item, list):
+					del og_item[i]
+					if len(in_cache) == 0:
+						del in_cache[timestamp]
 				else:
-					del self.in_cache[timestamp]
+					del in_cache[timestamp]
 
 				del self.path_timestamp[src_path]
 				del self.__cached_inos[self.path_to_ino(src_path)]
@@ -240,7 +243,7 @@ class Disk:
 				#embed()
 			self.old_src_path = src_path
 
-	def track(self, path: str, force: bool = False, reuse_ino=0) -> int:
+	def track(self, path: str, reuse_ino=0) -> int:
 		"""
 		Add `path` to internal filing structure and reserve it's disk space
 		reuse_ino: re-use an old inode
@@ -274,7 +277,6 @@ class Disk:
 			item = item[0]
 		src_path, size = item[0], item[1]
 		return src_path, size
-
 
 	def __make_room_for_path(self, force: bool, path: Path, open_paths: list[Path] = None) -> None:
 		if open_paths is None:
@@ -336,10 +338,10 @@ class Disk:
 			# elements in cache doesnt model reality (too few entries too many undocumented)
 			for parent in addedFolders:
 				self.path_to_ino(parent)
-				self.track(parent.__str__(), force)
+				self.track(parent.__str__())
 			if addedDirsSize == 0:
 				self.path_to_ino(dest)
-				self.track(path.__str__(), force)
+				self.track(path.__str__())
 
 			# TODO: use xattributes later and make a custom field:
 			# sth like __wolfs_atime__ : time.time_ns()
