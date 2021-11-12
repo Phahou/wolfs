@@ -8,7 +8,6 @@ from pyfuse3 import FUSEError
 from os import fsencode, fsdecode
 from disk import Disk, Path_str
 from util import Col
-import logging
 from vfs import VFS
 from fileInfo import FileInfo, DirInfo
 from pathlib import Path
@@ -114,6 +113,7 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 				self.vfs.set_inode_path(inode, next(iter(val)))
 		else:
 			self.vfs.del_inode(inode)
+			self.disk.del_inode(inode, path)
 
 	# done?
 	async def lookup(self, inode_p: int, name: str, ctx: pyfuse3.RequestContext = None) -> pyfuse3.EntryAttributes:
@@ -427,7 +427,3 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 	async def fsync(self, fh: int, datasync: bool) -> None:
 		log.warning(f' Not implemented')
 		raise FUSEError(errno.ENOSYS)
-
-	async def releasedir(self, fh: int) -> None:
-		# same as normal release() no more fh are using it
-		log.info(f"{__functionName__(self)} {self.vfs.inode_to_cpath(fh)}")

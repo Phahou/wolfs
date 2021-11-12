@@ -41,8 +41,9 @@ class Disk:
 	__MEGABYTE__: Final[int] = 1024 * 1024
 	__NANOSEC_PER_SEC__: Final[int] = 1_000_000_000
 	ROOT_INODE: Final[int] = 2
+	MIN_DIR_SIZE: Final[int] # set in __init__
 
-	def __init__(self, sourceDir: Path, cacheDir: Path, maxCacheSize: int, noatime: bool, cacheThreshold: float = 0.99):
+	def __init__(self, sourceDir: Path, cacheDir: Path, maxCacheSize: int, noatime: bool = True, cacheThreshold: float = 0.99):
 		# fs related:
 		self.sourceDir = Path(sourceDir)
 		if not self.sourceDir.exists():
@@ -68,8 +69,13 @@ class Disk:
 		self.__mnt_ino2st_ino: dict[int, int] = {pyfuse3.ROOT_INODE: self.ROOT_INODE, self.ROOT_INODE: self.ROOT_INODE}
 		self.__tmp_ino2st_ino: dict[int, int] = {pyfuse3.ROOT_INODE: self.ROOT_INODE, self.ROOT_INODE: self.ROOT_INODE}
 		self.__last_ino: int = 1  # as the first ino is always 2 (ino 1 is for bad blocks but fuse doesnt act that way)
-		self.__freed_inos: list[int] = []
+		self.__freed_inos: set[int] = set()
 		self.path_ino_map: dict[str, int] = dict()
+
+		# get OS dependant minimum directory size
+		os.mkdir('wolfs_tmp_directory')
+		self.MIN_DIR_SIZE = os.stat('wolfs_tmp_directory').st_size
+		os.rmdir('wolfs_tmp_directory')
 
 	def getNumberOfElements(self) -> int:
 		return len(self.in_cache)
@@ -101,6 +107,15 @@ class Disk:
 	# public api
 	# ==========
 
+	# Helpers
+	def mnt_ino_translation(self, inode: int) -> int:
+		return inode if inode != pyfuse3.ROOT_INODE else self.ROOT_INODE
+
+	def del_inode(self, inode: int, path: str) -> None:
+		self.__freed_inos.add(inode)
+		rpath = self.toRootPath(path)
+		del self.path_ino_map[rpath]
+
 	def toCachePath(self, path: Path_str) -> Path:
 		return CachePath.toDestPath(self.sourceDir, self.cacheDir, path)
 
@@ -114,18 +129,19 @@ class Disk:
 		"""
 		Maps paths to inodes. Creates them if necessary
 		re-uses ino `reuse_ino` if != 0
+		:raise ValueError instead of asserts on logic errors
 		"""
 		path: str = self.toRootPath(some_path)
 
 		if ino := self.path_ino_map.get(path):
 			ino = ino
-		# completely unused currently
-		#elif self.__freed_inos:
-		#	ino = self.__freed_inos[0]
-		#	del self.__freed_inos[0]
-		#	print(f"{__functionName__(self)} ino from deleted self.__freed_inos[0]:{ino}")
 		elif reuse_ino != 0:  # for rename operations
-			ino = reuse_ino
+			if reuse_ino > self.__last_ino:
+				raise ValueError(f"Reused ino is larger than largest generated ino {reuse_ino} > {self.__last_ino}")
+			elif reuse_ino in self.__freed_inos:
+				ino = reuse_ino
+			else:
+				raise ValueError(f"Reused ino {reuse_ino} is not in freed ino set {self.__freed_inos}")
 		else:
 			ino = self.__last_ino + 1
 			self.__last_ino += 1
@@ -135,8 +151,10 @@ class Disk:
 			foreign_ino: int = os.stat(some_path).st_ino
 			if some_path.__str__().startswith(self.sourceDir.__str__()):
 				self.__mnt_ino2st_ino[foreign_ino] = ino
-			else:
+			elif some_path.__str__().startswith(self.cacheDir.__str__()):
 				self.__tmp_ino2st_ino[foreign_ino] = ino
+			else:
+				raise ValueError(f"Wrong input! {some_path} has to have a prefix of {self.sourceDir} or {self.cacheDir}")
 		return ino
 
 	def mkdir_p(self, src: Path, added_folders=None, added_size: int = 0) -> tuple[int, list[Path]]:
@@ -168,6 +186,8 @@ class Disk:
 
 		Disk.copystat(src, dst)
 		return added_size, added_folders
+
+	# Size related
 
 	@staticmethod
 	def getSize(path: str = '.') -> int:
@@ -217,6 +237,39 @@ class Disk:
 			return self.isFilledBy(self.__cacheThreshold)
 		return self.isFilledBy(1.0)
 
+	# Book-Keeping related
+
+	def track(self, path: str, reuse_ino=0) -> int:
+		"""
+		Add `path` to internal filing structure and reserve it's disk space
+		reuse_ino: re-use an old inode
+		"""
+
+		# handling of create and mkdir (files dont exist yet so os.stat(path_) will throw an error)
+		path_: str = self.toSrcPath(path).__str__()
+		if not os.path.exists(path_):
+			path_ = self.toCachePath(path).__str__()
+
+		timestamp: int = getattr(os.stat(path_), self.time_attr) // self.__NANOSEC_PER_SEC__
+		size: int = os.path.getsize(path_)
+		src_path: str = self.toSrcPath(path).__str__()
+		ino: int = self.path_to_ino(src_path, reuse_ino=reuse_ino)
+		tracked_path = self.in_cache.get(timestamp)
+
+		assert isinstance(tracked_path, list) or isinstance(tracked_path, tuple) or tracked_path is None, "Type mismatch!"
+
+		if isinstance(self.in_cache.get(timestamp), list):
+			self.in_cache[timestamp].append((src_path, size))
+		elif isinstance(tracked_path, tuple):
+			self.in_cache[timestamp] = [self.in_cache[timestamp]] + [(src_path, size)]
+		else:
+			self.in_cache[timestamp] = (src_path, size)
+
+		self.path_timestamp[src_path] = timestamp
+		self.__cached_inos[ino] = True
+		self.__current_CacheSize += size
+		return ino
+
 	def untrack(self, path: str) -> None:
 		"""Doesnt track `path` anymore and frees up its reserved size."""
 		src_path: str = self.toSrcPath(path).__str__()
@@ -247,73 +300,6 @@ class Disk:
 				pass
 				#embed()
 			self.old_src_path = src_path
-
-	def track(self, path: str, reuse_ino=0) -> int:
-		"""
-		Add `path` to internal filing structure and reserve it's disk space
-		reuse_ino: re-use an old inode
-		"""
-
-		# handling of create and mkdir (files dont exist yet so os.stat(path_) will throw an error)
-		path_: str = self.toSrcPath(path).__str__()
-		if not os.path.exists(path_):
-			path_ = self.toCachePath(path).__str__()
-
-		timestamp: int = getattr(os.stat(path_), self.time_attr) // self.__NANOSEC_PER_SEC__
-		size: int = os.path.getsize(path_)
-		src_path: str = self.toSrcPath(path).__str__()
-		ino: int = self.path_to_ino(src_path, reuse_ino=reuse_ino)
-		tracked_path = self.in_cache.get(timestamp)
-		assert isinstance(tracked_path, list) or isinstance(tracked_path, tuple) or tracked_path is None, "Type mismatch!"
-		if isinstance(self.in_cache.get(timestamp), list):
-			self.in_cache[timestamp].append((src_path, size))
-		elif isinstance(tracked_path, tuple):
-			self.in_cache[timestamp] = [self.in_cache[timestamp]] + [(src_path, size)]
-		else:
-			self.in_cache[timestamp] = (src_path, size)
-		self.path_timestamp[src_path] = timestamp
-		self.__cached_inos[ino] = True
-		self.__current_CacheSize += size
-		return ino
-
-	def get_head_in_cache(self) -> tuple[str, int]:
-		item: Union[tuple[str, int], list[tuple[str, int]]] = self.in_cache.peekitem(index=0)[1]
-		if isinstance(item, list):
-			item = item[0]
-		src_path, size = item[0], item[1]
-		return src_path, size
-
-	def __make_room_for_path(self, force: bool, path: Path, open_paths: list[Path] = None) -> None:
-		if open_paths is None:
-			open_paths = []
-		while force and not self.__canStore(path):
-			try:
-				(src_path, size) = self.get_head_in_cache()
-				#assert timestamp in self.path_timestamp
-				self.untrack(src_path)
-			except IndexError:
-				log.warning(f"Deleted all non open files and still couldn't store file: {path}")
-				raise FUSEError(errno.EDQUOT)
-
-			cpath: Path = Path(self.toCachePath(src_path))
-
-			# skip open files (we cant sync and close them as they might be written / read from)
-			if cpath in open_paths:
-				continue
-
-			assert cpath.exists(), f'File {Col.path(cpath)} not in cache although it should be ?'
-
-			if os.path.isfile(cpath):
-				os.remove(cpath)
-			elif os.path.isdir(cpath):
-				try:
-					os.rmdir(cpath)
-				except OSError:
-					# directory isnt empty though I dont know what to do at this point
-					# as re-adding it isnt a option ( directory entries only change if files are added or deleted so)
-					# furthermore it would break the heap
-					# at least dont let the CacheSize get corrupted by this
-					self.__current_CacheSize += size
 
 	# todo: think about making a write cache for newly created files -> store write_ops
 	#       check after a timeout if said files still exist or are still referenced if not
@@ -435,6 +421,10 @@ class Disk:
 	def copystat(src: Path_str, dst: Path_str) -> None:
 		"""Book-keeping of file-Attributes"""
 		shutil.copystat(src, dst)
+
+	# ===============
+	# Print functions
+	# ===============
 
 	def getCurrentStatus(self) -> tuple:
 		""":returns: Current (fullness in %, usedCache, maxCache) of self.cacheDir"""
