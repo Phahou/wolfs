@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-from vfs import SOFTLINK_DISABLED_ERROR
+from errors import SOFTLINK_DISABLED_ERROR
 import os
 import pyfuse3
 import errno
@@ -16,16 +16,16 @@ from typing import Final, Union, cast, Optional
 import re
 from remote import RemoteNode # type: ignore
 from journal import Journal
-from util import __functionName__
+from util import CallStackAware
 
-
+import logging
 log = logging.getLogger(__name__)
 
 # ======================================================================================================================
 # VFSOps
 # ======================================================================================================================
 
-class VFSOps(pyfuse3.Operations):
+class VFSOps(pyfuse3.Operations, CallStackAware):
 	_DEFAULT_CACHE_SIZE: Final[int] = 512
 	__LOOKUP_NOENT_TIMEOUT_IN_SECS: Final[int] = 5
 	_STDOUT: Final[str] = "/dev/stdout"
@@ -50,7 +50,7 @@ class VFSOps(pyfuse3.Operations):
 	def printAllInodes(self, inode_p=Disk.ROOT_INODE) -> None:
 		item = self.vfs.inode_path_map[inode_p]
 		if isinstance(item, DirInfo):
-			log.debug(f"		{__functionName__(self, 2)} {inode_p}: {item.children}")
+			log.debug(f"\t\t {inode_p}: {item.children}")
 			for ino in item.children:
 				self.printAllInodes(ino)
 
@@ -67,8 +67,10 @@ class VFSOps(pyfuse3.Operations):
 		for attr in ('f_bsize', 'f_frsize', 'f_blocks', 'f_bfree', 'f_bavail',
 					 'f_files', 'f_ffree', 'f_favail'):
 			setattr(stat_, attr, getattr(statfs, attr))
+
 		stat_.f_namemax = statfs.f_namemax - (len(root.__str__()) + 1)
-		log.info(f"{__functionName__(self)}: elements in RAM: {Col.path(len(self.vfs.inode_path_map))}")
+		log.info(f"elements in RAM: {Col.path(len(self.vfs.inode_path_map))}")
+
 		if not self.journal.isCompletelyClean():
 			log.info(self.disk.getSummary())
 		self.journal.flushCompleteJournal()
@@ -79,7 +81,7 @@ class VFSOps(pyfuse3.Operations):
 		# mostly used for fifo / pipes but nowadays mkfifo would be better suited for that
 		# mostly rare use cases
 		path = os.path.join(self.vfs.inode_to_cpath(inode_p), fsdecode(name))
-		log.info(__functionName__(self) + f"{inode_p} {path} mode: {mode}, rdev: {rdev}")
+		log.info(f"{inode_p} {path} mode: {mode}, rdev: {rdev}")
 		try:
 			os.mknod(path, mode=(mode & ~ctx.umask), device=rdev)
 			os.chown(path, ctx.uid, ctx.gid)
@@ -99,13 +101,12 @@ class VFSOps(pyfuse3.Operations):
 		sorted_inodes: list[tuple[int, int]] = sorted(inode_list)
 		for (ino, nlookup) in sorted_inodes:
 			translated_ino_list.append((self.mnt_ino_translation(ino), nlookup))
-		log.debug(__functionName__(self) +
-		f' for untranslated: {Col.inode(sorted_inodes)} -> {Col.inode(translated_ino_list)} (translated)' + Col.END)
+		log.debug(f' for untranslated: {Col(sorted_inodes)} -> {Col(translated_ino_list)} (translated)')
 		await self.vfs.forget(translated_ino_list)
 
 	def _forget_path(self, inode: int, path: str) -> None:
 		# gets called internally so no translation
-		log.debug(f'{__functionName__(self)} {Col.path(path)} as ino {Col.inode(inode)}')
+		log.debug(f'{Col(path)} as ino {Col(inode)}')
 		val = self.vfs.inode_to_cpath(inode)
 		if isinstance(val, set):
 			val.remove(path)
@@ -122,7 +123,7 @@ class VFSOps(pyfuse3.Operations):
 		# ignore some lookups when debugging
 		if not re.findall(r'^.?(folder|cover|convert|tumbler|hidden|jpg|png|jpeg|file|svn)', name,
 						  re.IGNORECASE | re.ASCII):
-			log.debug(f'{__functionName__(self)} for {Col.file(name)} in {Col.inode(inode_p)}')
+			log.debug(f'for {Col(name)} in {Col(inode_p)}')
 		return await self.__lookup(inode_p, name, ctx)
 
 	async def __lookup(self, inode_p: int, name: str, ctx: pyfuse3.RequestContext = None) -> pyfuse3.EntryAttributes:
@@ -149,7 +150,7 @@ class VFSOps(pyfuse3.Operations):
 		attr.entry_timeout = VFSOps.__LOOKUP_NOENT_TIMEOUT_IN_SECS
 		if not re.findall(r'^.?(folder|cover|convert|tumbler|hidden|jpg|png|jpeg|file|svn)', name,
 						  re.IGNORECASE | re.ASCII):
-			log.debug(f'Couldnt find {Col.file(name)} in {Col.inode(inode_p)}')
+			log.debug(f'Couldnt find {Col(name)} in {Col(inode_p)}')
 		return attr
 
 	# attr methods (from vfs)
@@ -161,7 +162,7 @@ class VFSOps(pyfuse3.Operations):
 	async def getattr(self, inode: int, ctx: pyfuse3.RequestContext = None) -> pyfuse3.EntryAttributes:
 		inode_untranslated = inode
 		inode = self.mnt_ino_translation(inode_untranslated)
-		#log.info(f'{__functionName__(self)} in {Col.inode(inode)} (translated from: {Col.inode(inode_untranslated)})')
+		#log.info(f' in {Col.inode(inode)} (translated from: {Col.inode(inode_untranslated)})')
 		entry = await self.vfs.getattr(inode, ctx)
 		path = self.vfs.inode_to_cpath(inode)
 		entry.st_ino = self.path_to_ino(path)
@@ -178,7 +179,7 @@ class VFSOps(pyfuse3.Operations):
 		assert not os.path.islink(f), "Symbolic links are currently illegal / not implemented!"
 
 		# in case the file is bigger than the whole cache size (likely on small cache sizes)
-		log.info(f"{__functionName__(self)} {Col.file(f)}")
+		log.info(f"{Col(f)}")
 		if not self.disk.canFit(size):
 			log.error('Tried to fetch a file larger than the cache Size Quota')
 			raise FUSEError(errno.EDQUOT)
@@ -202,7 +203,7 @@ class VFSOps(pyfuse3.Operations):
 			for child in childs:
 				child_info = self.vfs.inode_path_map[child]
 				cache: Path = child_info.cache # type: ignore
-				assert isinstance(cache, Path), f"{__functionName__(self, 2)} {SOFTLINK_DISABLED_ERROR}{Col.END}"
+				assert isinstance(cache, Path), f"{self} {SOFTLINK_DISABLED_ERROR}"
 				self.vfs.inode_path_map[child].cache = Path(cache.__str__().replace(cache.parent.__str__(), parent_new))
 				if isinstance(child_info, DirInfo):
 					rename_childs(child_info.children, parent_new)
@@ -225,7 +226,7 @@ class VFSOps(pyfuse3.Operations):
 		if os.path.exists(path_new):  # calls lookup and fails if path_new will be overwritten
 			raise FUSEError(errno.EINVAL)
 
-		log.info(__functionName__(self) + f" {Col.file(path_old)} -> {Col.file(path_new)}")
+		log.info(f"{Col(path_old)} -> {Col(path_new)}")
 		self.fetchFile(ino_old)
 
 		try:
@@ -239,10 +240,11 @@ class VFSOps(pyfuse3.Operations):
 		old_children: list[int] = info_old_p.children
 		new_children: list[int] = cast(DirInfo, inoPathMap[inode_p_new]).children
 
-		# look if this is right idk really it's getting late....
 		def logMsg(self: VFSOps, ino_old: int, path_old: str, children: list[int], cache_path: str) -> None:
-			log.debug(__functionName__(self, 2) + f'Trying to delete {Col.inode(ino_old)}({Col.path(path_old)}) ' +
-					  f'from {Col.file(children)} ({Col.path(cache_path)})')
+			ino_old, path_old = Col(ino_old), Col(path_old)
+			children, cache_path = Col(children), Col(cache_path)
+			log.debug(f'Trying to delete {ino_old}({path_old}) from {children} ({cache_path})')
+
 		logMsg(self, inode_p_old, path_old, old_children, info_old_p.cache.__str__())
 
 		# remove from old parent
@@ -268,13 +270,12 @@ class VFSOps(pyfuse3.Operations):
 
 	async def open(self, inode: int, flags: int, ctx: pyfuse3.RequestContext) -> pyfuse3.FileInfo:
 		inode, inode_old = self.mnt_ino_translation(inode), inode
-		log.debug(__functionName__(
-			self) + f' {Col.inode(inode)}, flags: {Col.file(flags)}; old_ino: {Col.inode(inode_old)}')
+		log.debug(f'{Col(inode)}, flags: {Col(flags)}; old_ino: {Col(inode_old)}')
 
 		if self.vfs.already_open(inode):
 			fd: int = self.vfs._inode_fd_map[inode]
 			self.vfs._fd_open_count[fd] += 1
-			# log.info(__functionName__(self) + f" (fd, inode): ({fd}, {Col.inode(inode)})")
+			# log.info(self + f" (fd, inode): ({fd}, {Col.inode(inode)})")
 			return pyfuse3.FileInfo(fh=fd)
 
 		# disable creation handling here
@@ -290,7 +291,7 @@ class VFSOps(pyfuse3.Operations):
 			attr.st_ino = inode
 			info.entry = attr
 		except KeyError:
-			log.error(f"{__functionName__(self)}({inode}, {hex(flags)})")
+			log.error(f"({inode}, {hex(flags)})")
 			raise FUSEError(errno.ENOENT)
 		except OSError as exc:
 			raise FUSEError(exc.errno)
@@ -304,11 +305,13 @@ class VFSOps(pyfuse3.Operations):
 	async def create(self, inode_p: int, name: str, mode: int, flags: int, ctx: pyfuse3.RequestContext) -> tuple[pyfuse3.FileInfo, pyfuse3.EntryAttributes]:
 		inode_p = self.mnt_ino_translation(inode_p)
 		cpath: str = os.path.join(self.vfs.inode_to_cpath(inode_p), fsdecode(name))
-		log.debug(__functionName__(self) + ' ' + Col.file(cpath) + ' in ' + Col.inode(inode_p) + Col.END)
+		log.debug(f'{Col(cpath)} in {Col(inode_p)}')
+
 		try:
 			fd: int = os.open(cpath, flags | os.O_CREAT | os.O_TRUNC)
 		except OSError as exc:
 			raise FUSEError(exc.errno)
+
 		attr = FileInfo.getattr(fd=fd)
 		attr.st_ino = self.disk.track(cpath.__str__())
 		self.vfs.addFilePath(inode_p, attr.st_ino, cpath, attr)
@@ -316,7 +319,9 @@ class VFSOps(pyfuse3.Operations):
 		self.vfs._inode_fd_map[attr.st_ino] = fd
 		self.vfs._fd_inode_map[fd] = attr.st_ino
 		self.vfs._fd_open_count[fd] = 1
+
 		self.journal.create(attr.st_ino, cpath, flags | os.O_CREAT | os.O_TRUNC)
+
 		# TODO: check if the same
 		f: pyfuse3.FileInfo = pyfuse3.FileInfo(fh=fd)
 		return f, attr
@@ -332,7 +337,7 @@ class VFSOps(pyfuse3.Operations):
 	async def unlink(self, inode_p: int, name: str, ctx: pyfuse3.RequestContext) -> None:
 		inode_p = self.mnt_ino_translation(inode_p)
 		name = fsdecode(name)
-		log.debug(__functionName__(self) + f' {Col.file(name)} in  {Col.inode(inode_p)}')
+		log.debug(f'{Col(name)} in {Col(inode_p)}')
 		parent = self.vfs.inode_to_cpath(inode_p)
 		path = os.path.join(parent, name)
 		try:
@@ -404,7 +409,7 @@ class VFSOps(pyfuse3.Operations):
 		inode = self.vfs._fd_inode_map[fd]
 		del self.vfs._inode_fd_map[inode]
 		del self.vfs._fd_inode_map[fd]
-		log.debug(f"{__functionName__(self)} fd: {fd} ino: {inode}")
+		log.debug(f"fd: {fd} ino: {inode}")
 		try:
 			os.close(fd)
 		except OSError as exc:
@@ -420,7 +425,7 @@ class VFSOps(pyfuse3.Operations):
 		return os.fsync(fh)  # data is only written to cache_dir
 
 	async def fsync(self, fh: int, datasync: bool) -> None:
-		log.warning(f'{self.__class__.__name__}.fsync(): Not implemented')
+		log.warning(f' Not implemented')
 		raise FUSEError(errno.ENOSYS)
 
 	async def releasedir(self, fh: int) -> None:

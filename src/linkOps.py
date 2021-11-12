@@ -4,7 +4,8 @@ from os import fsencode, fsdecode
 import os
 from pathlib import Path
 from xattrs import XAttrsOps
-
+import logging
+log = logging.getLogger(__name__)
 # pretty much only dead code for now but it will be used later on when the file system is a bit more
 # stable and needs  for example the extended xattrs funcs
 class AdditionalOps(XAttrsOps):
@@ -12,6 +13,7 @@ class AdditionalOps(XAttrsOps):
 	# =========================
 
 	async def readlink(self, inode: int, ctx: RequestContext) -> bytes:
+		log.info()
 		raise FUSEError(errno.ENOSYS)
 		path: Path = self.vfs.inode_to_cpath(inode)
 		try:
@@ -21,8 +23,9 @@ class AdditionalOps(XAttrsOps):
 		return fsencode(target)
 
 	async def link(self, inode: int, new_inode_p: int, new_name: str, ctx: RequestContext) -> EntryAttributes:
-		raise FUSEError(errno.ENOSYS)
+		# raise FUSEError(errno.ENOSYS)
 		# hardlink
+		log.info()
 		new_name = fsdecode(new_name)
 		parent: Path = self.vfs.inode_to_cpath(new_inode_p)
 		path: str = os.path.join(parent, new_name)
@@ -34,6 +37,7 @@ class AdditionalOps(XAttrsOps):
 		return await self.getattr(inode)
 
 	async def symlink(self, inode_p: int, name: str, target: str, ctx: RequestContext) -> EntryAttributes:
+		log.info()
 		raise FUSEError(errno.ENOSYS)
 		name = fsdecode(name)
 		target = fsdecode(target)

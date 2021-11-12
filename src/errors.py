@@ -1,4 +1,9 @@
-#!/usr/bin/python
+#!/usr/bin/env python
+
+
+# Error strings
+SOFTLINK_DISABLED_ERROR = "Softlinks are currently not implemented"
+HARDLINK_DIR_ILLEGAL_ERROR = "Hardlinks to directories are illegal!"
 
 class WolfsError(Exception):
 	"""Base Exception class for HSM-CacheFS"""

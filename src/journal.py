@@ -96,7 +96,7 @@ class Journal:
 		# TODO: could probably just change them when we really need to
 		#      like if remote == last entry of history or sth
 		#      and somewhere in the self.__last_remote_path is different
-		Disk.cpAttrs(cache_file, remote)
+		Disk.copystat(cache_file, remote)
 
 	def __replayFile_Op(self, op: File_Ops, src_path: Path, logEntry: LogEntry, i: int) -> int:
 		def __unlink(src_path: Path) -> None:
@@ -106,14 +106,14 @@ class Journal:
 				os.rmdir(src_path)
 			except FileNotFoundError:
 				if '.Trash' in src_path.__str__():
-					log.warning(__functionName__(self, 3) + f"{Col.path(src_path)} not found in Trash -> Ignoring")
+					log.warning(__functionName__(self, 3) + f"{Col(src_path)} not found in Trash -> Ignoring")
 
 		def __mkdir(src_path: Path, logEntry: LogEntry) -> None:
 			mode: int = getattr(logEntry, 'mode')
 			try:
 				os.mkdir(src_path, mode)
 			except OSError as exc:
-				log.error(exc)
+				log.exception(exc)
 				raise pyfuse3.FUSEError(exc.errno)
 
 		def __create(src_path: Path, logEntry: LogEntry) -> None:
@@ -228,7 +228,7 @@ class Journal:
 		# TODO: sync up later (timer would probably be the best choice or
 		#  		some kind of check if there is almost no space available on underlying cache disk)
 		# special case if we enable renaming things:
-		# log.warning(f'{__functionName__(self, 2)} Not implemented')
+		# log.warning(f'Not implemented')
 		pass
 
 	def rename(self, inode: int, path_old: str, path_new: str) -> None:

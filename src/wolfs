@@ -5,7 +5,6 @@
 
 from fsops import Wolfs as Operations
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
-import logging
 import pyfuse3
 import trio
 import sys
@@ -16,12 +15,47 @@ from util import Col
 DEBUG = False
 DEBUG_FUSE = False
 
+import datetime
+import logging
+import time
+
+old_factory = logging.getLogRecordFactory()
+def record_factory(*args, **kwargs):
+    record = old_factory(*args, **kwargs)
+    switch = {
+        'DEBUG': 'DEBUG',
+        'INFO': 'INFO',
+        'CRITICAL': 'CRIT',
+        'ERROR': 'ERROR',
+        'WARNING': 'WARN',
+    }
+    record.logLvl = switch[record.levelname]
+    return record
+
+
+class RuntimeFormatter(logging.Formatter):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.start_time = time.time()
+
+    def formatTime(self, record, datefmt=None):
+        duration = datetime.datetime.utcfromtimestamp(record.created - self.start_time)
+        elapsed = duration.strftime('%M:%S')
+        return "{}".format(elapsed)
+
+
 def init_logging(debug=False):
-    formatter = logging.Formatter(f'%(asctime)s.%(msecs)03d [%(levelname)8s] '
-                                  #'%(threadName)'s'
-                                  f'[%(name)8s] | %(message)s {Col.END}',
-                                  # datefmt="%Y-%m-%d %H:%M:%S"
-                                  datefmt="%H:%M:%S")
+    logging.setLogRecordFactory(record_factory)
+    formatter = RuntimeFormatter(
+        f'%(asctime)s.%(msecs)03d '
+        '[%(logLvl)5s]'
+        #[%(levelname)1s] '    
+        #'%(threadName)'s'
+        f'[%(name)8s.%(funcName)-10s:%(lineno)3s] | %(message)s {Col.END}',
+        # datefmt="%Y-%m-%d %H:%M:%S"
+        datefmt="%H:%M:%S"
+    )
+
     handler = logging.StreamHandler()
     handler.setFormatter(formatter)
     root_logger = logging.getLogger()

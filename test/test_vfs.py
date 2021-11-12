@@ -13,7 +13,7 @@ from IPython import embed
 embed = embed
 import random
 import time
-from test_config import REMOTE, MNT_DIR, DATA_DIR
+from test.test_config import REMOTE, MNT_DIR, DATA_DIR
 
 
 TEST_FILE = __file__

@@ -15,16 +15,15 @@ from pathlib import Path
 import logging
 log = logging.getLogger(__name__)
 from disk import CachePath
-from util import is_type, Col, __functionName__
-import util
-from typing import Union, Final, cast, Any, Optional
+from util import Col, CallStackAware, sizeof, formatByteSize
+from typing import Union, Final, cast
 from fileInfo import FileInfo, DirInfo
+from errors import SOFTLINK_DISABLED_ERROR, HARDLINK_DIR_ILLEGAL_ERROR
+
 
 ########################################################################################################################
 
-SOFTLINK_DISABLED_ERROR = "Softlinks are currently not implemented"
-
-class VFS:
+class VFS(CallStackAware):
 	__next_inode: int = pyfuse3.ROOT_INODE
 
 	def __inode_generator(self) -> int:
@@ -48,16 +47,16 @@ class VFS:
 
 	# shorthands
 	def __toCachePath(self, path: Union[str, Path]) -> Path:
-		return CachePath.toCachePath(self.sourceDir, self.cacheDir, path)
+		return CachePath.toDestPath(self.sourceDir, self.cacheDir, path)
 
 	def __toSrcPath(self, path: Union[str, Path]) -> Path:
-		return CachePath.toSrcPath(self.sourceDir, self.cacheDir, path)
+		return CachePath.toDestPath(self.cacheDir, self.sourceDir, path)
 
 	def already_open(self, inode: int) -> bool:
 		return inode in self._inode_fd_map
 
 	def getRamUsage(self) -> str:
-		return util.formatByteSize(util.sizeof(self.inode_path_map))
+		return formatByteSize(sizeof(self.inode_path_map))
 
 	# "properties"
 	def del_inode(self, inode: int) -> None:
@@ -81,7 +80,7 @@ class VFS:
 		try:
 			val = self.inode_path_map[inode].cache
 		except KeyError:  # file likely doesnt exist. Logic error otherwise
-			log.error(__functionName__(self) + f" inode: {Col.inode(inode)} has no path defined")
+			log.error(f'inode: {Col(inode)} has no path defined')
 			raise FUSEError(errno.ENOENT)
 
 		if isinstance(val, set):
@@ -116,8 +115,7 @@ class VFS:
 
 	def addFilePath(self, inode_p: int, inode: int, path: str, entry: pyfuse3.EntryAttributes) -> None:
 		"""Also adds file to parent inode `inode_p`"""
-		assert inode_p != inode, \
-			f"{__functionName__(self)} inode_p({Col.inode(inode_p)}) can't be inode({Col.inode(inode)})"
+		assert inode_p != inode, f"{self} inode_p({Col(inode_p)}) can't be inode({Col(inode)})"
 		assert inode == entry.st_ino, 'entry ino must be the same as lookup ino'
 		self.add_path(inode, path, entry)
 
@@ -150,18 +148,18 @@ class VFS:
 			return
 
 		# no hardlinks for directories
-		assert not os.path.isdir(path), f"{__functionName__(self)} Hardlinks to directories are illegal! path: {path}{Col.END}"
+		assert not os.path.isdir(path), f"{self}{HARDLINK_DIR_ILLEGAL_ERROR} | (path: {path})"
 
 		# generate hardlink from path as inode is already in map
 		info = self.inode_path_map[inode]
 		# we only need to check one entry as both are always the same type
 		if isinstance(info.src, set):
-			assert isinstance(info.cache, set), f"{__functionName__(self)} cache & src should always be the same type!{Col.END}"
+			assert isinstance(info.cache, set), f"{self} cache & src should always be the same type!"
 			# saving both to be able to sync later to srcDir
 			info.src.add(src_p)
 			info.cache.add(cache_p)
 		elif info.src != src_p:
-			assert False, f"{__functionName__(self)} Softlinks are currently not implemented!{Col.END}"
+			assert False, f"{self}{SOFTLINK_DISABLED_ERROR}"
 			self.inode_path_map[inode].src = cast(set, {src_p, info.src})
 			self.inode_path_map[inode].cache = cast(set, {cache_p, info.cache})
 
@@ -196,10 +194,10 @@ class VFS:
 			if self._lookup_cnt[inode] > nlookup:
 				self._lookup_cnt[inode] -= nlookup
 				continue
-			log.debug(f'{Col.BY}forgetting about inode {Col.inode(inode)}')
+			log.debug(f'{Col.BY}forgetting about inode {Col(inode)}')
 			assert inode not in self._inode_fd_map
 			del self._lookup_cnt[inode]
 		# try:
 		#	self.del_inode(inode)
 		# except KeyError:  # may have been deleted
-		#	log.warning(__functionName__(self) + f' already deleted {Col.bg(inode)}')
+		#	log.warning(self + f' already deleted {Col.bg(inode)}')

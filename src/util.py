@@ -1,4 +1,5 @@
 #!/usr/bin/python
+from pathlib import Path
 from queue import PriorityQueue
 
 import sys
@@ -16,8 +17,14 @@ from typing import Final
 DEFAULT_CACHE_SIZE: Final[int] = 512
 __ROOT_INODE__: Final[int] = 2
 
+# this can be ignored fully as logging supports this too.....
+# https://stackoverflow.com/questions/533048/how-to-log-source-file-name-and-line-number-in-python
+class CallStackAware:
+	def __str__(self) -> str:
+		return __functionName__(self, 2)
+
 def __functionName__(self: object, i: int = 1) -> str:
-	return f"{Col.BY}{self.__class__.__name__}.{inspect.stack()[i][3]}():{Col.BW}"
+	return f"{Col.BY}{self.__class__.__name__}.{inspect.stack()[i][3]}(): {Col.END}"
 
 
 def convert(func: Callable) -> Callable:
@@ -85,6 +92,20 @@ class MaxPrioQueue(PriorityQueue):
 
 class Col:
 	"""A simple Coloring class"""
+
+	def __init__(self, obj: object):
+		self.obj = obj
+
+	def __str__(self):
+		if isinstance(self.obj, int):
+			return Col.inode(self.obj)
+		elif isinstance(self.obj, Path):
+			return Col.path(self.obj)
+		elif isinstance(self.obj, str):
+			return Col.file(self.obj)
+		elif isinstance(self.obj, list):
+			return Col.directory(self.obj)
+
 	BOLD = '\033[1m'
 	B = BOLD
 
@@ -117,16 +138,21 @@ class Col:
 	END = '\033[0m'
 
 	@staticmethod
-	def inode(i: object) -> str:
+	def inode(o: object) -> str:
 		"""Green"""
-		return f'{Col.BG}{i}{Col.BW}'
+		return f'{Col.BG}{o}{Col.BW}'
 
 	@staticmethod
-	def path(p: object) -> str:
+	def path(o: object) -> str:
 		"""Yellow"""
-		return f'{Col.BY}{p}{Col.BW}'
+		return f'{Col.BY}{o}{Col.BW}'
 
 	@staticmethod
-	def file(f: object) -> str:
+	def file(o: object) -> str:
 		"""Cyan"""
-		return f'{Col.BC}{f}{Col.BW}'
+		return f'{Col.BC}{o}{Col.BW}'
+
+	@staticmethod
+	def directory(o: object) -> str:
+		"""Purple"""
+		return f'{Col.BP}{o}{Col.BW}'

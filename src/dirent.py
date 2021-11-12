@@ -17,9 +17,7 @@ class DirentOps(VFSOps):
 
 	async def mkdir(self, inode_p: int, name: str, mode: int, ctx: pyfuse3.RequestContext) -> pyfuse3.EntryAttributes:
 		raise FUSEError(errno.ENOSYS)
-		log.info(
-			__functionName__(
-				self) + f" {Col.file(name)} in {Col.inode(inode_p)} with mode {Col.file(mode & ctx.umask)}")
+		log.info(f" {Col(name)} in {Col(inode_p)} with mode {Col.file(mode & ctx.umask)}")
 		# works but isnt snappy (folder is only shown after reentering it in thunar)
 		path = os.path.join(self.vfs.inode_to_cpath(inode_p), fsdecode(name))
 		if inode := self.vfs.getInodeOf(path, inode_p):
@@ -47,8 +45,7 @@ class DirentOps(VFSOps):
 		parent = self.vfs.inode_to_cpath(inode_p)
 		path = os.path.join(parent, name)
 		inode = self.path_to_ino(path)
-		log.info(__functionName__(
-			self) + f" {Col.inode(inode)}({Col.path(path)}) in {Col.inode(inode_p)}({Col.path(parent)})" + Col.END)
+		log.info(f"{Col(inode)}({Col(path)}) in {Col(inode_p)}({Col(parent)})")
 		self.fetchFile(inode)
 		try:
 			os.rmdir(path)
@@ -61,9 +58,8 @@ class DirentOps(VFSOps):
 
 	async def opendir(self, inode: int, ctx: pyfuse3.RequestContext) -> int:
 		inode = self.mnt_ino_translation(inode)
-		log.info(f"{__functionName__(self)} {self.vfs.inode_to_cpath(inode)}")
 		dirent: DirInfo = cast(DirInfo, self.vfs.inode_path_map[inode])
-		log.info(f"{Col.BW}Containing: {Col.file(dirent.children)}")
+		log.info(f"{Col.path(self.vfs.inode_to_cpath(inode))} contains: {Col(dirent.children)}")
 		# ctx contains gid, uid, pid and umask
 		return inode
 

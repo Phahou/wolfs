@@ -17,7 +17,7 @@ from logging import getLogger
 
 log = getLogger(__name__)
 
-from util import formatByteSize, Col, MaxPrioQueue, __functionName__
+from util import formatByteSize, Col, MaxPrioQueue
 from vfsops import VFSOps
 from fileInfo import FileInfo, DirInfo
 from errors import NotEnoughSpaceError
@@ -73,7 +73,7 @@ class Wolfs(DirentOps):
 		:param self.time_attr decides if mtime or atime is used
 		:return: MaxPrioQueue() with most recently edited / accessed files (atime / mtime)
 		"""
-		assert isinstance(root, Path), f"{__functionName__(self)}: root({root}) must be of type str"
+		assert isinstance(root, Path), f"{self}root({root}) must be of type str"
 
 		def print_progress(indexedFileNr: int, func_str: str, st_ino: int, path: str) -> int:
 			if indexedFileNr in range(0, 1_000_000, 1_000):
