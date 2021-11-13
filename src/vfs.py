@@ -68,8 +68,8 @@ class VFS(CallStackAware):
 		self.inode_path_map[inode].src = self.__toSrcPath(path)
 		self.inode_path_map[inode].cache = self.__toCachePath(path)
 
-	def set_inode_entry(self, inode: int, entry: pyfuse3.EntryAttributes) -> None:
-		self.inode_path_map[inode].entry = entry
+	# def set_inode_entry(self, inode: int, entry: pyfuse3.EntryAttributes) -> None:
+	#	self.inode_path_map[inode].entry = entry
 
 	# ==============
 	# inode handling

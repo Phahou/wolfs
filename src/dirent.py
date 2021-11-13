@@ -20,7 +20,29 @@ class DirentOps(XAttrsOps):
 		self.freezed_dirents: dict[int: [int]] = dict()
 
 	async def mkdir(self, inode_p: int, name: str, mode: int, ctx: pyfuse3.RequestContext) -> pyfuse3.EntryAttributes:
-		raise FUSEError(errno.ENOSYS)
+		# in cache:
+		#		mkdir normally, update DirInfo of parent and create a DirInfo for new ino
+		# in src:
+		#		log that it needs to be made if it was possible in cache
+		# might cause problems:
+		# 	- no disk space in:
+		# 		- src   but in cache
+		#		- cache but in src
+		#		- cache & src
+		#
+		# softlinks dont need to be regarded as they dont come up here
+		#
+		# exec:
+		#	1. get info of inode_p and stuff
+		#	2. check if enough disk space is there in cache and src
+		#		if not for cache: raise FUSEError(errno.ENOBUFS)
+		#		if not for src:   raise FUSEError(errno.ENOSPC)
+		#	3. try to mkdir
+		#		might fail due to permissions
+		#	4. update DirInfo of inode_p & new inode, track...
+		#	5. log to journal and sync later (assumption): no one modifies the directory on the backend
+		#	6. done
+
 		log.info(f" {Col(name)} in {Col(inode_p)} with mode {Col.file(mode & ctx.umask)}")
 		# works but isnt snappy (folder is only shown after reentering it in thunar)
 		path = os.path.join(self.vfs.inode_to_cpath(inode_p), fsdecode(name))
@@ -42,15 +64,30 @@ class DirentOps(XAttrsOps):
 		# TODO: log on success
 		#       die.net: Upon successful completion, the rmdir() function shall mark for update the st_ctime and st_mtime fields of the parent directory.
 		#       -> update entries
-		raise FUSEError(errno.ENOSYS)
+
 		inode_p = self.mnt_ino_translation(inode_p)
 
-		name = fsdecode(name)
 		parent = self.vfs.inode_to_cpath(inode_p)
-		path = os.path.join(parent, name)
+		path = os.path.join(parent, fsdecode(name))
 		inode = self.path_to_ino(path)
 		log.info(f"{Col(inode)}({Col(path)}) in {Col(inode_p)}({Col(parent)})")
-		self.fetchFile(inode)
+
+		# check if path is softlink into a flag (hardlinks to dirs dont exist)
+
+		# check if path is present in tmp dir
+		# 	yes -> use a native rmdir
+		#   no  ->	skip rmdir, but check if it would be possible to
+		#   		remove the directory with current permissions and so on
+		#			-> do a "virtual" rmdir
+		#				another way would be: mkdir with saved DirInfo and then
+		#				deleting it but that doesnt make much sense at all
+
+		# update parent inode according to die.net
+		#   either way -> update dirinfo of inode_p and delete path from dirinfo of path
+		#		if dirinfo has no more links then delete inode of path too as (hardlink case)
+
+		# no exceptions: log in journal that directory has to be removed later
+		# exception: 	 log nothing return
 		try:
 			os.rmdir(path)
 		except OSError as exc:

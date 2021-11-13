@@ -250,21 +250,23 @@ class Disk:
 		if not os.path.exists(path_):
 			path_ = self.toCachePath(path).__str__()
 
+		# get info about tracked file
 		timestamp: int = getattr(os.stat(path_), self.time_attr) // self.__NANOSEC_PER_SEC__
 		size: int = os.path.getsize(path_)
 		src_path: str = self.toSrcPath(path).__str__()
 		ino: int = self.path_to_ino(src_path, reuse_ino=reuse_ino)
 		tracked_path = self.in_cache.get(timestamp)
 
+		# save meta info
 		assert isinstance(tracked_path, list) or isinstance(tracked_path, tuple) or tracked_path is None, "Type mismatch!"
-
-		if isinstance(self.in_cache.get(timestamp), list):
+		if isinstance(tracked_path, list):
 			self.in_cache[timestamp].append((src_path, size))
 		elif isinstance(tracked_path, tuple):
 			self.in_cache[timestamp] = [self.in_cache[timestamp]] + [(src_path, size)]
 		else:
 			self.in_cache[timestamp] = (src_path, size)
 
+		# update book-keeping
 		self.path_timestamp[src_path] = timestamp
 		self.__cached_inos[ino] = True
 		self.__current_CacheSize += size
@@ -277,16 +279,19 @@ class Disk:
 			try:
 				i: int = 0
 
-				# assign references for a bit of a speedup
+				# assign references for a bit of a speedup / readablity
 				in_cache = self.in_cache
+
+				# getting the correct item by type
 				og_item: Union[tuple[str, int], list[tuple[str, int]]] = in_cache[timestamp]
-				item = og_item
 				if isinstance(og_item, list):
 					i = [y[0] for y in og_item].index(src_path)
 					item = og_item[i]
+				else:
+					item = og_item
 				(t_path, size) = item[0], item[1]
-				self.__current_CacheSize -= size
 
+				# actual clean up
 				if isinstance(og_item, list):
 					del og_item[i]
 					if len(in_cache) == 0:
@@ -296,10 +301,10 @@ class Disk:
 
 				del self.path_timestamp[src_path]
 				del self.__cached_inos[self.path_to_ino(src_path)]
-			except KeyError:
-				pass
-				#embed()
-			self.old_src_path = src_path
+				self.__current_CacheSize -= size
+			except KeyError as e:
+				log.error("KeyError Exception that shouldnt have happened happened")
+				log.exception(e)
 
 	# todo: think about making a write cache for newly created files -> store write_ops
 	#       check after a timeout if said files still exist or are still referenced if not

@@ -119,7 +119,7 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 	async def lookup(self, inode_p: int, name: str, ctx: pyfuse3.RequestContext = None) -> pyfuse3.EntryAttributes:
 		name = fsdecode(name)
 		inode_p = self.mnt_ino_translation(inode_p)
-		# why does it use the inode numbers of the cache directory ?
+
 		# ignore some lookups when debugging
 		if not re.findall(r'^.?(folder|cover|convert|tumbler|hidden|jpg|png|jpeg|file|svn)', name,
 						  re.IGNORECASE | re.ASCII):
@@ -162,7 +162,6 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 	async def getattr(self, inode: int, ctx: pyfuse3.RequestContext = None) -> pyfuse3.EntryAttributes:
 		inode_untranslated = inode
 		inode = self.mnt_ino_translation(inode_untranslated)
-		#log.info(f' in {Col.inode(inode)} (translated from: {Col.inode(inode_untranslated)})')
 		entry = await self.vfs.getattr(inode, ctx)
 		path = self.vfs.inode_to_cpath(inode)
 		entry.st_ino = self.path_to_ino(path)
@@ -170,13 +169,14 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 
 	# path methods
 	# ============
+
 	def __fetchFile(self, f: Path, size: int) -> None:
 		"""
 		Discards one or multiple files to make space for `f`
 		Strategry used is to discard the Least recently used files
 		:raise pyfuse3.FUSEError  with errno set to according error
 		"""
-		assert not os.path.islink(f), "Symbolic links are currently illegal / not implemented!"
+		assert not os.path.islink(f), SOFTLINK_DISABLED_ERROR
 
 		# in case the file is bigger than the whole cache size (likely on small cache sizes)
 		log.info(f"{Col(f)}")
@@ -326,15 +326,15 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 		f: pyfuse3.FileInfo = pyfuse3.FileInfo(fh=fd)
 		return f, attr
 
-	def __unlink_inode_in_parent_directory(self, inode_p: int, inode: int, path: str) -> None:
-		# inode from /tmp might not be present here anymore but file isnt deleted in src
-		info_p: DirInfo = cast(DirInfo, self.vfs.inode_path_map[inode_p])
-		assert isinstance(info_p, DirInfo), "Type mismatch"
-		assert inode in info_p.children, f"{inode} not in {info_p.children}, path {path}"
-		info_p.children.remove(inode)
-		self.disk.untrack(path)
-
 	async def unlink(self, inode_p: int, name: str, ctx: pyfuse3.RequestContext) -> None:
+		def unlink_inode_in_parent_directory(inode_p: int, inode: int, path: str) -> None:
+			# inode from /tmp might not be present here anymore but file isnt deleted in src
+			info_p: DirInfo = cast(DirInfo, self.vfs.inode_path_map[inode_p])
+			assert isinstance(info_p, DirInfo), "Type mismatch"
+			assert inode in info_p.children, f"{inode} not in {info_p.children}, path {path}"
+			info_p.children.remove(inode)
+			self.disk.untrack(path)
+
 		inode_p = self.mnt_ino_translation(inode_p)
 		name = fsdecode(name)
 		log.debug(f'{Col(name)} in {Col(inode_p)}')
@@ -345,7 +345,7 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 				os.unlink(path)
 			self.vfs.getInodeOf(path, inode_p) # check if path still exists virtually
 			inode = self.path_to_ino(path)
-			self.__unlink_inode_in_parent_directory(inode_p, inode, path)
+			unlink_inode_in_parent_directory(inode_p, inode, path)
 
 		except OSError as exc:
 			raise FUSEError(exc.errno)
