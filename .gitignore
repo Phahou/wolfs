@@ -5,5 +5,5 @@ __pycache__
 cover.png
 mnt/local_data/*
 mnt/mountpoint/*
-metaInfo.db
+*.db
 test/test_config.py

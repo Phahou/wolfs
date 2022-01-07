@@ -95,18 +95,16 @@ class VFS(CallStackAware):
 
 	# search for an inode via path
 	def getInodeOf(self, path: str, inode_p: int) -> int:
-		"""Get Inoder referencing ´path´ which is in directory inode ´inode_p´"""
+		"""Get Inode referencing ´path´ which is in directory inode ´inode_p´"""
 		i2p = self.inode_to_cpath
-		info: Union[FileInfo, DirInfo] = self.inode_path_map[inode_p]
-		if isinstance(info, DirInfo):
-			children: list[int] = cast(DirInfo, self.inode_path_map[inode_p]).children
-		else:
-			assert isinstance(info, FileInfo), f"Type mismatch got: {type(info)}, expected FileInfo"
-			return 0
-		assert children, f'children is empty {self.inode_path_map[inode_p].__str__()}'
-		paths: list[tuple[int, str]] = [(child_inode, i2p(child_inode).__str__()) for child_inode in children]
-		old_inode: list[tuple[int, str]] = list(filter(lambda path_: path_[1] == path, paths))
+		info: DirInfo = cast(DirInfo, self.inode_path_map[inode_p])
+		children: list[int] = cast(DirInfo, self.inode_path_map[inode_p]).children
+
+		assert children, f'children is None {self.inode_path_map[inode_p].__str__()}'
+		paths: list[tuple[int, str]] = [(ino, i2p(ino).__str__()) for ino in children]
+		old_inode: list[tuple[int, str]] = list(filter(lambda x: x[1] == path, paths))
 		assert len(old_inode) < 2, f'We have 2 full_paths?'
+
 		if old_inode:
 			return old_inode[0][0]
 		else:

@@ -14,7 +14,7 @@ import logging
 import pyfuse3
 from pyfuse3 import FUSEError
 from src.util import Col, formatByteSize
-from src.errors import NotEnoughSpaceError, SOFTLINK_DISABLED_ERROR
+from errors import NotEnoughSpaceError, SOFTLINK_DISABLED_ERROR
 from typing import Union, Final
 from sortedcontainers import SortedDict
 
@@ -205,6 +205,9 @@ class Disk:
 		"""Is the cache large enough to hold `size` ?"""
 		# if isinstance(file, FileInfo):
 		return size < self.__maxCacheSize
+
+	def canReserve(self, size: int) -> bool:
+		return self.canFit(size + self.__current_CacheSize)
 
 	def canStore(self, path: Path) -> bool:
 		"""Does the cache have room  for `path` ?"""

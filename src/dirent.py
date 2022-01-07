@@ -3,6 +3,7 @@
 from src.xattrs import XAttrsOps
 from vfsops import VFSOps, log
 import os
+import os.path
 import pyfuse3
 import errno
 from pyfuse3 import FUSEError
@@ -35,29 +36,48 @@ class DirentOps(XAttrsOps):
 		# exec:
 		#	1. get info of inode_p and stuff
 		#	2. check if enough disk space is there in cache and src
-		#		if not for cache: raise FUSEError(errno.ENOBUFS)
-		#		if not for src:   raise FUSEError(errno.ENOSPC)
+		#		if not for cache & src:   raise FUSEError(errno.ENOSPC)
 		#	3. try to mkdir
 		#		might fail due to permissions
 		#	4. update DirInfo of inode_p & new inode, track...
 		#	5. log to journal and sync later (assumption): no one modifies the directory on the backend
 		#	6. done
+		def validity_check():
+
+			# abort if directory already exists (we have to check this virtually
+			# as Path.exists() might say no although it already exists in the src )
+			if self.vfs.getInodeOf(cpath, inode_p):
+				log.warning(f"Tried to make a directory that already exists:"
+							f"  mkdir({parent_path},{name},{hex(mode)})")
+				raise FUSEError(errno.EEXIST)
+
+			# 2. check for disk space in _cache_
+			# TODO: checks for cache disk but not src
+			#		might need another module as we arent currently tracking free space on the backing store
+			if not self.disk.canReserve(self.disk.MIN_DIR_SIZE):
+				raise FUSEError(errno.ENOSPC)
+
 
 		log.info(f" {Col(name)} in {Col(inode_p)} with mode {Col.file(mode & ctx.umask)}")
-		# works but isnt snappy (folder is only shown after reentering it in thunar)
-		path = os.path.join(self.vfs.inode_to_cpath(inode_p), fsdecode(name))
-		if inode := self.vfs.getInodeOf(path, inode_p):
-			raise FUSEError(errno.EEXIST)
+
+		# 1. get info of inode_p and stuff
+		parent_path = self.vfs.inode_to_cpath(inode_p)
+		cpath = os.path.join(parent_path, fsdecode(name))
+		validity_check()
+
 		try:
 			# can succeed as dir might not be present in cache
-			os.mkdir(path, mode=(mode & ~ctx.umask))
-			os.chown(path, ctx.uid, ctx.gid)
+			os.mkdir(cpath, mode=(mode & ~ctx.umask))
+			os.chown(cpath, ctx.uid, ctx.gid)
 		except OSError as exc:
 			raise FUSEError(exc.errno)
-		attr = FileInfo.getattr(path=path)
-		attr.st_ino = self.disk.track(path)
-		self.vfs.addFilePath(inode_p, attr.st_ino, path, attr)
-		self.journal.mkdir(attr.st_ino, path, mode)
+
+		# update book-keeping
+		attr = FileInfo.getattr(path=cpath)
+		attr.st_ino = self.disk.track(cpath)
+		self.vfs.addFilePath(inode_p, attr.st_ino, cpath, attr)
+		self.journal.mkdir(attr.st_ino, cpath, mode)
+
 		return attr
 
 	async def rmdir(self, inode_p: int, name: str, ctx: pyfuse3.RequestContext) -> None:
@@ -68,19 +88,23 @@ class DirentOps(XAttrsOps):
 		inode_p = self.mnt_ino_translation(inode_p)
 
 		parent = self.vfs.inode_to_cpath(inode_p)
-		path = os.path.join(parent, fsdecode(name))
-		inode = self.path_to_ino(path)
-		log.info(f"{Col(inode)}({Col(path)}) in {Col(inode_p)}({Col(parent)})")
+		cpath = os.path.join(parent, fsdecode(name))
+		inode = self.path_to_ino(cpath)
+		log.info(f"{Col(inode)}({Col(cpath)}) in {Col(inode_p)}({Col(parent)})")
 
-		# check if path is softlink into a flag (hardlinks to dirs dont exist)
+		# check if cpath is softlink into a flag (hardlinks to dirs dont exist)
 
-		# check if path is present in tmp dir
+		# check if cpath is present in tmp dir
 		# 	yes -> use a native rmdir
-		#   no  ->	skip rmdir, but check if it would be possible to
-		#   		remove the directory with current permissions and so on
-		#			-> do a "virtual" rmdir
-		#				another way would be: mkdir with saved DirInfo and then
-		#				deleting it but that doesnt make much sense at all
+		#   no  ->	skip rmdir,
+		#   		check if dir is present in backend -> oh its more complex than I thought
+		#   		-> yes:	would it be possible to	remove the directory with current permissions and so on ?
+		#				-> 	yes: do a "virtual" rmdir
+		#					another way would be: mkdir with saved DirInfo and then
+		#					deleting it but that doesnt make much sense at all
+		#			-> no:
+		#				erno.ENOEXT (dir doesnnot exist)
+		#
 
 		# update parent inode according to die.net
 		#   either way -> update dirinfo of inode_p and delete path from dirinfo of path
@@ -88,14 +112,19 @@ class DirentOps(XAttrsOps):
 
 		# no exceptions: log in journal that directory has to be removed later
 		# exception: 	 log nothing return
-		try:
-			os.rmdir(path)
-		except OSError as exc:
-			raise FUSEError(exc.errno)
+		if os.path.exists(cpath):
+			try:
+				os.rmdir(cpath)
+			except OSError as exc:
+				raise FUSEError(exc.errno)
+		else:
+			assert False, "cpath search not implemented in for backend"
+			pass
+			#if self.disk.isInBackend(inode):
 
-		self.journal.rmdir(inode, path)
+		self.journal.rmdir(inode, cpath)
 		if self.vfs.inLookupCnt(inode):
-			self._forget_path(inode, path)
+			self._forget_path(inode, cpath)
 
 	async def opendir(self, inode: int, ctx: pyfuse3.RequestContext) -> int:
 		inode = self.mnt_ino_translation(inode)
@@ -126,7 +155,7 @@ class DirentOps(XAttrsOps):
 				log.debug(f"{dirent} is of type FileInfo -> readdir_reply call")
 				entries = ()
 
-			return sorted(entries)
+			return sorted(entries) if len(entries) > 0 else None
 
 		if off == 0:
 			path = self.vfs.inode_to_cpath(inode)
@@ -136,16 +165,20 @@ class DirentOps(XAttrsOps):
 			# each readdir cycle. This ensures that we dont skip any entries or report them twice
 			# as required by pyfuse. This doesnt mean opening the same directory twice wouldnt
 			# show the same results by different processes
-			self.freezed_dirents[inode] = freeze_dirents()
-		s_entries = self.freezed_dirents[inode]
+			if freezed_dirents := freeze_dirents():
+				self.freezed_dirents[inode] = freezed_dirents
+		s_entries = self.freezed_dirents.get(inode)
+
+		if s_entries is None:
+			return
 
 		# skip last run as nothing will be returned either way
-		if off != 0 and off == s_entries[-1][0]:
+		elif off != 0 and off == s_entries[-1][0]:
 			del self.freezed_dirents[inode]
 			return
 
 		i = 0
-		log.debug('  %d entries left, starting at ino %d', len(s_entries), off)
+		log.debug('  %d entries left, starting at offset/ino %d', len(s_entries), off)
 		# as we didnt tested posix compatibility yet we keep this warning:
 		# 	This is not fully posix compatible. If there are hardlinks
 		# 	(two names with the same inode), we don't have a unique

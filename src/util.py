@@ -105,6 +105,8 @@ class Col:
 			return Col.file(self.obj)
 		elif isinstance(self.obj, list):
 			return Col.directory(self.obj)
+		elif isinstance(self.obj, bytes):
+			return Col(str(self.obj, "utf8")).__str__()
 
 	BOLD = '\033[1m'
 	B = BOLD
