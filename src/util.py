@@ -12,10 +12,8 @@ from typing import Callable
 import functools
 from datetime import datetime
 import inspect
-from typing import Final
 
-DEFAULT_CACHE_SIZE: Final[int] = 512
-__ROOT_INODE__: Final[int] = 2
+
 
 # this can be ignored fully as logging supports this too.....
 # https://stackoverflow.com/questions/533048/how-to-log-source-file-name-and-line-number-in-python

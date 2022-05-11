@@ -6,15 +6,15 @@ SOFTLINK_DISABLED_ERROR = "Softlinks are currently not implemented"
 HARDLINK_DIR_ILLEGAL_ERROR = "Hardlinks to directories are illegal!"
 
 class WolfsError(Exception):
-	"""Base Exception class for HSM-CacheFS"""
+	"""Base Exception class for Wolfs"""
 
 
 class MountError(WolfsError):
-	"""File System couldnt be mounted"""
+	"""File System couldn't be mounted"""
 
 
 class WakeupError(WolfsError):
-	"""Remote Node couldnt be woken up"""
+	"""Remote Node couldn't be woken up"""
 
 
 class NotEnoughSpaceError(WolfsError):

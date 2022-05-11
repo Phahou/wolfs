@@ -7,3 +7,6 @@ mnt/local_data/*
 mnt/mountpoint/*
 *.db
 test/test_config.py
+out.gv
+src/myuses.*
+overview.mdj
