@@ -11,15 +11,39 @@ import errno
 import sys
 import os
 import logging
-import pyfuse3
 from pyfuse3 import FUSEError
 from src.util import Col, formatByteSize
-from errors import NotEnoughSpaceError, SOFTLINK_DISABLED_ERROR
-from typing import Union, Final
+from src.errors import NotEnoughSpaceError, SOFTLINK_DISABLED_ERROR
+from typing import Union, Final, get_args
 from sortedcontainers import SortedDict
 
 log = logging.getLogger(__name__)
 Path_str = Union[str, Path]
+
+class PathTranslator:
+	sourceDir: Path
+	cacheDir: Path
+
+	def __init__(self, sourceDir: Path, cacheDir: Path):
+		def setattr_exit_on_failure(name: str, value: Path) -> None:
+			path = Path(value)
+			if not path.exists():
+				log.critical(f'[Errno {errno.ENOENT}] {os.strerror(errno.ENOENT)}: {path}')
+				sys.exit(errno.ENOENT)
+			else:
+				setattr(self, name, path)
+
+		setattr_exit_on_failure('sourceDir', sourceDir)
+		setattr_exit_on_failure('cacheDir', cacheDir)
+
+	def toRoot(self, path: Path_str) -> str:
+		return CachePath.toRootPath(self.sourceDir, self.cacheDir, path)
+
+	def toSrc(self, path: Path_str) -> Path:
+		return CachePath.toDestPath(self.cacheDir, self.sourceDir, path)
+
+	def toTmp(self, path: Path_str) -> Path:
+		return CachePath.toDestPath(self.sourceDir, self.cacheDir, path)
 
 
 class CachePath(Path):
@@ -36,94 +60,68 @@ class CachePath(Path):
 		result = f"{destDir.__str__()}{root}".replace('//', '/')
 		return Path(result)
 
-
-class Disk:
+class DiskBase:
+	ROOT_INODE: Final[int] = 2
 	__MEGABYTE__: Final[int] = 1024 * 1024
 	__NANOSEC_PER_SEC__: Final[int] = 1_000_000_000
-	ROOT_INODE: Final[int] = 2
-	MIN_DIR_SIZE: Final[int] # set in __init__
 
-	def __init__(self, sourceDir: Path, cacheDir: Path, maxCacheSize: int, noatime: bool = True, cacheThreshold: float = 0.99):
-		# fs related:
-		self.sourceDir = Path(sourceDir)
-		if not self.sourceDir.exists():
-			print(f'[Errno {errno.ENOENT}] {os.strerror(errno.ENOENT)}: {sourceDir}')
-			sys.exit(errno.ENOENT)
+class Cache(DiskBase):
+	maxCacheSize: Final[int]
+	MIN_DIR_SIZE: Final[int]
 
-		self.cacheDir = Path(cacheDir)
-		if not self.cacheDir.exists():
-			print(f'[Errno {errno.ENOENT}] {os.strerror(errno.ENOENT)}: {cacheDir}')
-			sys.exit(errno.ENOENT)
+	def __init__(self, maxCacheSize: int, noatime: bool = True, cacheThreshold: float = 0.99):
+		# get OS dependant minimum directory size
+		os.mkdir('wolfs_tmp_directory')
+		self.MIN_DIR_SIZE = os.stat('wolfs_tmp_directory').st_size
+		os.rmdir('wolfs_tmp_directory')
 
-		# cache related:
-		self.__current_CacheSize: int = 0
-		self.__cacheThreshold: float = cacheThreshold
-		self.__maxCacheSize: int = maxCacheSize * self.__MEGABYTE__
+		self._current_CacheSize: int = 0
+		self._cacheThreshold: float = cacheThreshold
+		self.maxCacheSize = maxCacheSize * self.__MEGABYTE__
+
 		self.time_attr: str = 'st_mtime_ns' if noatime else 'st_atime_ns'  # remote has mountopt noatime set?
 
 		self.in_cache: SortedDict[int, (str, int)] = SortedDict()
 		self.path_timestamp: dict[str, int] = dict()
-		self.__cached_inos: dict[int, bool] = dict()
-
-		# for mnt_ino_translation and path_to_ino mapping functions
-		self.__mnt_ino2st_ino: dict[int, int] = {pyfuse3.ROOT_INODE: self.ROOT_INODE, self.ROOT_INODE: self.ROOT_INODE}
-		self.__tmp_ino2st_ino: dict[int, int] = {pyfuse3.ROOT_INODE: self.ROOT_INODE, self.ROOT_INODE: self.ROOT_INODE}
-		self.__last_ino: int = 1  # as the first ino is always 2 (ino 1 is for bad blocks but fuse doesnt act that way)
-		self.__freed_inos: set[int] = set()
-		self.path_ino_map: dict[str, int] = dict()
+		self._cached_inos: dict[int, bool] = dict()
 
 		# get OS dependant minimum directory size
 		os.mkdir('wolfs_tmp_directory')
 		self.MIN_DIR_SIZE = os.stat('wolfs_tmp_directory').st_size
 		os.rmdir('wolfs_tmp_directory')
 
-	def getNumberOfElements(self) -> int:
-		return len(self.in_cache)
+	# fullness of cache
+	def __le__(self, other: int) -> bool:
+		"""Is the cache large enough to hold `size` ?"""
+		return other <= self.maxCacheSize
 
-	# ===========
-	# private api
-	# ===========
+	def __lt__(self, other: int) -> bool:
+		return other < self.maxCacheSize
 
-	def isInCache(self, ino: int) -> bool:
-		return ino in self.__cached_inos
+	def __gt__(self, other: int) -> bool:
+		return other > self.maxCacheSize
 
-	def _rebuildCacheDir(self) -> None:
-		"""
-		Rebuild the internal book-keeping ( `self.__curent_CacheSize` , `self.in_cache` ) variables\n
-		based on the contents currently in `self.cacheDir`
-		"""
-		self.in_cache.clear()
-		self.__current_CacheSize = 0
-		getsize, islink, join = os.path.getsize, os.path.islink, os.path.join
-		for dirpath, dirnames, filenames in os.walk(self.cacheDir, followlinks=False):
-			for f in filenames:
-				path = join(dirpath, f)
-				# skip symbolic links for now
-				if islink(path):
-					continue
-				self.cp2Cache(Path(path))
+	def __ge__(self, other: int) -> bool:
+		return other >= self.maxCacheSize
 
-	# ==========
-	# public api
-	# ==========
 
-	# Helpers
-	def mnt_ino_translation(self, inode: int) -> int:
-		return inode if inode != pyfuse3.ROOT_INODE else self.ROOT_INODE
+class InodeTranslator(PathTranslator, DiskBase):
+	def __init__(self, sourceDir: Path, cacheDir: Path):
+		super().__init__(sourceDir, cacheDir)
 
-	def del_inode(self, inode: int, path: str) -> None:
+		# for mnt_ino_translation and path_to_ino mapping functions
+		#self.__mnt_ino2st_ino: dict[int, int] = {FUSE_ROOT_INODE: self.ROOT_INODE, self.ROOT_INODE: self.ROOT_INODE}
+		#self.__tmp_ino2st_ino: dict[int, int] = {FUSE_ROOT_INODE: self.ROOT_INODE, self.ROOT_INODE: self.ROOT_INODE}
+		self.__last_ino: int = 1  # as the first ino is always 2 (ino 1 is for bad blocks but fuse doesnt act that way)
+		self.__freed_inos: set[int] = set()
+		self.path_ino_map: dict[str, int] = dict()
+
+	def __delitem__(self, inode__path: tuple[int, str]) -> None:
+		"""delete translation inode"""
+		inode, path = inode__path
 		self.__freed_inos.add(inode)
-		rpath = self.toRootPath(path)
+		rpath = self.toRoot(path)
 		del self.path_ino_map[rpath]
-
-	def toCachePath(self, path: Path_str) -> Path:
-		return CachePath.toDestPath(self.sourceDir, self.cacheDir, path)
-
-	def toSrcPath(self, path: Path_str) -> Path:
-		return CachePath.toDestPath(self.cacheDir, self.sourceDir, path)
-
-	def toRootPath(self, path: Path_str) -> str:
-		return CachePath.toRootPath(self.sourceDir, self.cacheDir, path)
 
 	def path_to_ino(self, some_path: Path_str, reuse_ino=0) -> int:
 		"""
@@ -131,7 +129,7 @@ class Disk:
 		re-uses ino `reuse_ino` if != 0
 		:raise ValueError instead of asserts on logic errors
 		"""
-		path: str = self.toRootPath(some_path)
+		path: str = self.toRoot(some_path)
 
 		if ino := self.path_ino_map.get(path):
 			ino = ino
@@ -147,28 +145,102 @@ class Disk:
 			self.__last_ino += 1
 		self.path_ino_map[path] = ino
 
-		if os.path.exists(some_path):  # update foreign translation only if accessible
-			foreign_ino: int = os.stat(some_path).st_ino
-			if some_path.__str__().startswith(self.sourceDir.__str__()):
-				self.__mnt_ino2st_ino[foreign_ino] = ino
-			elif some_path.__str__().startswith(self.cacheDir.__str__()):
-				self.__tmp_ino2st_ino[foreign_ino] = ino
-			else:
-				raise ValueError(f"Wrong input! {some_path} has to have a prefix of {self.sourceDir} or {self.cacheDir}")
+		#if os.path.exists(some_path):  # update foreign translation only if accessible
+		#	foreign_ino: int = os.stat(some_path).st_ino
+		#	if some_path.__str__().startswith(self.sourceDir.__str__()):
+		#		self.__mnt_ino2st_ino[foreign_ino] = ino
+		#	elif some_path.__str__().startswith(self.cacheDir.__str__()):
+		#		self.__tmp_ino2st_ino[foreign_ino] = ino
+		#	else:
+		#		raise ValueError(
+		#			f"Wrong input! {some_path} has to have a prefix of {self.sourceDir} or {self.cacheDir}")
 		return ino
 
+class AbstractDisk(Cache):
+	trans: InodeTranslator
+
+	# just an indirection for shorthands
+	@property
+	def sourceDir(self):
+		return self.trans.sourceDir
+
+	@sourceDir.setter
+	def sourceDir(self, value):
+		assert False, 'sourceDir will never be set after instanciation!'
+
+	@property
+	def cacheDir(self):
+		return self.trans.cacheDir
+
+	@cacheDir.setter
+	def cacheDir(self, value):
+		assert False, 'cacheDir will never be set after instanciation!'
+
+	def __init__(self,  sourceDir: Path, cacheDir: Path, maxCacheSize: int, noatime: bool = True, cacheThreshold: float = 0.99):
+		self.trans = InodeTranslator(sourceDir, cacheDir)
+
+		super().__init__(maxCacheSize, noatime, cacheThreshold)
+
+	# getting inode and path info
+	def __getitem__(self, item: Union[int, Path_str]) -> int:
+		""""""
+#		if isinstance(item, int):
+#			ino = item if item != FUSE_ROOT_INODE else self.ROOT_INODE
+		if isinstance(item, get_args(Path_str)):
+			if isinstance(item, Path_str):
+				ino = self.trans.path_to_ino(item)
+			else:
+				path, reused_ino = item
+				ino = self.trans.path_to_ino(path, reused_ino)
+		else:
+			assert False, f"TypeError: '{type(item)}' is not supported"
+		return ino
+
+
+class Disk(AbstractDisk):
+
+	def __init__(self, sourceDir: Path, cacheDir: Path, maxCacheSize: int, noatime: bool = True,
+				 cacheThreshold: float = 0.99):
+		super().__init__(sourceDir, cacheDir, maxCacheSize, noatime, cacheThreshold)
+
+	# unused
+	# ===========
+	# private api
+	# ===========
+
+#	def _rebuildCacheDir(self) -> None:
+#		"""
+#		Rebuild the internal book-keeping ( `self.__curent_CacheSize` , `self.in_cache` ) variables\n
+#		based on the contents currently in `self.cacheDir`
+#		"""
+#		self.in_cache.clear()
+#		self._current_CacheSize = 0
+#		getsize, islink, join = os.path.getsize, os.path.islink, os.path.join
+#		for dirpath, dirnames, filenames in os.walk(self.cacheDir, followlinks=False):
+#			for f in filenames:
+#				path = join(dirpath, f)
+#				# skip symbolic links for now
+#				if islink(path):
+#					continue
+#				self.cp2Cache(Path(path))
+
+	# ==========
+	# public api
+	# ==========
+
+	# Helpers
 	def mkdir_p(self, src: Path, added_folders=None, added_size: int = 0) -> tuple[int, list[Path]]:
 		"""
-		Recursively re-creates the directoriy path up until `src` for `dst`.
+		Recursively re-creates the directory path up until `src` for `dst`.
 
 		Bascially the same as "mkdir -P dst" with the caviat that the attributes of the corresponding `src`-directory
 		  are copied too.
 
-		:return tuple of added empty folder sizes list of filepath to in between folders
+		returns: tuple of added empty folder sizes list of filepath to in between folders
 
 		actually it is like generate in betweens
 		"""
-		dst: Path = self.toCachePath(src)
+		dst: Path = self.trans.toTmp(src)
 
 		if added_folders is None:
 			added_folders = []
@@ -201,13 +273,8 @@ class Disk:
 					total_size += os.path.getsize(fp)
 		return total_size
 
-	def canFit(self, size: int) -> bool:
-		"""Is the cache large enough to hold `size` ?"""
-		# if isinstance(file, FileInfo):
-		return size < self.__maxCacheSize
-
 	def canReserve(self, size: int) -> bool:
-		return self.canFit(size + self.__current_CacheSize)
+		return (size + self._current_CacheSize) < self.maxCacheSize
 
 	def canStore(self, path: Path) -> bool:
 		"""Does the cache have room  for `path` ?"""
@@ -215,30 +282,29 @@ class Disk:
 			# TODO: maybe try to get filesize via lstat (like stat but supports links)
 			src = path.__str__() # if isinstance(path, Path) else path
 			assert not os.path.islink(src), f"{self} {SOFTLINK_DISABLED_ERROR}"
-			assert self.toSrcPath(src) == path, f"{self} input is not from remotefs"
+			assert self.trans.toSrc(src) == path, f"{self} input is not from remotefs"
 
 			# take into account directories which have to be created
-			cpath = self.toCachePath(path)
+			cpath = self.trans.toTmp(path)
 			in_between_dir_sizes = 0
 			while not cpath.parent.exists():
 				in_between_dir_sizes += self.MIN_DIR_SIZE
 				cpath = cpath.parent
 
-			cache_size = in_between_dir_sizes + os.path.getsize(src) + self.__current_CacheSize
-			return cache_size <= self.__maxCacheSize
+			cache_size = in_between_dir_sizes + os.path.getsize(src) + self._current_CacheSize
+			return cache_size <= self.maxCacheSize
 
 		assert False, f'{self}: Types are wrong: {path}({type(path)}) not in [Path, str, FileInfo]'
 
 	def isFilledBy(self, percent: float) -> bool:
 		""":param percent: between [0.0, 1.0]"""
 		assert 0.0 <= percent <= 1.0, 'disk_isFullBy: needs to be [0-1]'
-		diskUsage = self.__current_CacheSize / self.__maxCacheSize
+		diskUsage = self._current_CacheSize / self.maxCacheSize
 		return True if diskUsage >= percent else False
 
 	def isFull(self, use_threshold: bool = False) -> bool:
-		if use_threshold:
-			return self.isFilledBy(self.__cacheThreshold)
-		return self.isFilledBy(1.0)
+		percentage = self._cacheThreshold if use_threshold else 1.0
+		return self.isFilledBy(percentage)
 
 	# Book-Keeping related
 
@@ -249,15 +315,15 @@ class Disk:
 		"""
 
 		# handling of create and mkdir (files dont exist yet so os.stat(path_) will throw an error)
-		path_: str = self.toSrcPath(path).__str__()
+		path_: str = self.trans.toSrc(path).__str__()
 		if not os.path.exists(path_):
-			path_ = self.toCachePath(path).__str__()
+			path_ = self.trans.toTmp(path).__str__()
 
 		# get info about tracked file
 		timestamp: int = getattr(os.stat(path_), self.time_attr) // self.__NANOSEC_PER_SEC__
 		size: int = os.path.getsize(path_)
-		src_path: str = self.toSrcPath(path).__str__()
-		ino: int = self.path_to_ino(src_path, reuse_ino=reuse_ino)
+		src_path: str = self.trans.toSrc(path).__str__()
+		ino: int = self.trans.path_to_ino(src_path, reuse_ino=reuse_ino)
 		tracked_path = self.in_cache.get(timestamp)
 
 		# save meta info
@@ -271,13 +337,13 @@ class Disk:
 
 		# update book-keeping
 		self.path_timestamp[src_path] = timestamp
-		self.__cached_inos[ino] = True
-		self.__current_CacheSize += size
+		self._cached_inos[ino] = True
+		self._current_CacheSize += size
 		return ino
 
 	def untrack(self, path: str) -> None:
-		"""Doesnt track `path` anymore and frees up its reserved size."""
-		src_path: str = self.toSrcPath(path).__str__()
+		"""Doesn't track `path` anymore and frees up its reserved size. Can be seen as a 'delete'"""
+		src_path: str = self.trans.toSrc(path).__str__()
 		if timestamp := self.path_timestamp.get(src_path):
 			try:
 				i: int = 0
@@ -303,8 +369,8 @@ class Disk:
 					del in_cache[timestamp]
 
 				del self.path_timestamp[src_path]
-				del self.__cached_inos[self.path_to_ino(src_path)]
-				self.__current_CacheSize -= size
+				del self._cached_inos[self.trans.path_to_ino(src_path)]
+				self._current_CacheSize -= size
 			except KeyError as e:
 				log.error("KeyError Exception that shouldnt have happened happened")
 				log.exception(e)
@@ -327,21 +393,21 @@ class Disk:
 		  a dirty file which has not yet been sync'd and data would be lost
 		  calls assert if this happens at the moment
 		"""
-		assert self.toSrcPath(path) == path, f"{path} doesn't have {self.sourceDir} prefix"
+		assert self.trans.toSrc(path) == path, f"{path} doesn't have {self.trans.sourceDir} prefix"
 		self.__make_room_for_path(force, path, open_paths)
 
 		if self.canStore(path):
-			dest = self.toCachePath(path)
-			addedDirsSize, addedFolders = self._cp_path(path, dest)
-			self.__current_CacheSize += addedDirsSize
+			dest = self.trans.toTmp(path)
+			addedDirsSize, addedFolders = self.__cp_path(path, dest)
+			self._current_CacheSize += addedDirsSize
 			# folders which are created by cp2Dir are untracked and should be tracked...
 			# elements in cache doesnt model reality (too few entries too many undocumented)
 			for parent in addedFolders:
-				self.path_to_ino(parent)
+				self.trans.path_to_ino(parent)
 				self.track(parent.__str__())
 
 			if addedDirsSize == 0:
-				self.path_to_ino(dest)
+				self.trans.path_to_ino(dest)
 				self.track(path.__str__())
 
 			# TODO: use xattributes later and make a custom field:
@@ -372,7 +438,7 @@ class Disk:
 				log.warning(f"Deleted all non open files and still couldn't store file: {path}")
 				raise FUSEError(errno.EDQUOT)
 
-			cpath: Path = Path(self.toCachePath(src_path))
+			cpath: Path = Path(self.trans.toTmp(src_path))
 
 			# skip open files (we cant sync and close them as they might be written / read from)
 			if cpath in open_paths:
@@ -390,9 +456,9 @@ class Disk:
 					# as re-adding it isnt a option ( directory entries only change if files are added or deleted so)
 					# furthermore it would break the heap
 					# at least dont let the CacheSize get corrupted by this
-					self.__current_CacheSize += size
+					self._current_CacheSize += size
 
-	def _cp_path(self, src: Path_str, dst: Path_str) -> tuple[int, list[Path]]:
+	def __cp_path(self, src: Path_str, dst: Path_str) -> tuple[int, list[Path]]:
 		"""
 		Create a copy of `src` in `dst` while also keeping meta-data.
 		Creates parent directories on the fly.
@@ -434,21 +500,11 @@ class Disk:
 	# Print functions
 	# ===============
 
-	def getCurrentStatus(self) -> tuple:
-		""":returns: Current (fullness in %, usedCache, maxCache) of self.cacheDir"""
-		usedCache = self.__current_CacheSize
-		maxCache = self.__maxCacheSize
-		return 100 * usedCache / maxCache, usedCache, maxCache
-
 	def getSummary(self) -> str:
-		diskUsage, usedCache, maxCache = self.getCurrentStatus()
-		diskUsage = Col.path(f'{Col.BY}{diskUsage:.8f}%')
-		usedCache = Col.path(formatByteSize(usedCache))
-		maxCache = Col.path(formatByteSize(maxCache))
+		diskUsage = Col.path(f'{Col.BY}{(100 * self._current_CacheSize / self.maxCacheSize):.8f}%')
+		usedCache = Col.path(formatByteSize(self._current_CacheSize))
+		MAX_CACHE_SIZE = Col.path(formatByteSize(self.maxCacheSize))
 		copySummary =\
-			f'{Col.BW}Cache is currently storing {Col(self.getNumberOfElements())} elements and is {diskUsage} '\
-			+ f' full (used: {usedCache} / {maxCache} )'
+			f'{Col.BW}Cache is currently storing {Col(len(self.in_cache))} elements and is {diskUsage} '\
+			+ f' full (used: {usedCache} / {MAX_CACHE_SIZE} )'
 		return str(copySummary)
-
-	def printSummary(self) -> None:
-		print(self.getSummary())

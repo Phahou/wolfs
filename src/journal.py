@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 # external imports
+import sys
 from pathlib import Path
 import os
 from enum import Flag, auto
@@ -8,6 +9,8 @@ import dataclasses
 import logging
 
 import pyfuse3
+
+from fileInfo import DirInfo, FileInfo
 
 log = logging.getLogger(__name__)
 
@@ -19,7 +22,8 @@ from disk import Path_str
 from IPython import embed
 
 embed = embed
-from typing import TypeVar, Final
+from typing import Final, cast
+
 Write_Op = tuple[int, int]
 INVALID_VALUE: Final[int] = -1
 
@@ -30,6 +34,7 @@ class File_Ops(Flag):
 	UNLINK = auto()
 	RENAME = auto()
 	MKDIR = auto()
+	FLUSH = auto()
 
 @dataclasses.dataclass
 class LogEntry:
@@ -47,10 +52,15 @@ class Journal:
 
 	def __init__(self, disk: Disk, vfs: VFS, logFile: Path):
 		self.disk: Disk = disk
+		self.src_statvfs = os.statvfs(disk.sourceDir)
+		if self.src_statvfs.f_bsize == 0:
+			sys.exit("Unkown Filesystem (statvfs.f_bsize == 0)")
+		self.src_bytes_avail: int = self.src_statvfs.f_bavail * self.src_statvfs.f_bsize
+		self.bytes_unwritten: int = 0
 		self.vfs: VFS = vfs
 		self.logFile = logFile
 		self.__history: list[LogEntry] = []
-		self.__inode_dirty_map2: dict[int, bool] = dict()
+		self.__inode_dirty_map2: dict[int, int] = dict()
 		self.__last_remote_path: str = ""
 		self.__last_fds: Write_Op = Journal.__EMPTY_FDS
 
@@ -63,8 +73,8 @@ class Journal:
 		:param cache_file: cached file to be synced
 		:param write_ops: history of write operations to file preceeding last sync
 		"""
-		remote: Path = self.disk.toSrcPath(cache_file)
-		if cache_file != self.disk.toCachePath(cache_file):
+		remote: Path = self.disk.trans.toSrc(cache_file)
+		if cache_file != self.disk.trans.toTmp(cache_file):
 			c = LogEntry(op=File_Ops.CREATE, inode=0, path=cache_file)
 			for entry in self.__history:
 				if entry.path == cache_file.__str__():
@@ -122,7 +132,7 @@ class Journal:
 			os.close(fd)
 
 		def __rename(src_path: Path, logEntry: LogEntry) -> None:
-			path_new: Path = self.disk.toSrcPath(getattr(logEntry, 'path_new'))
+			path_new: Path = self.disk.trans.toSrc(getattr(logEntry, 'path_new'))
 			os.rename(src_path, path_new)
 			self.vfs.inode_path_map[logEntry.inode].src = path_new
 
@@ -148,9 +158,6 @@ class Journal:
 		else:
 			switcher[op](src_path, logEntry, i)
 			return i + 1
-
-	def __markDirty(self, inode: int) -> None:
-		self.__inode_dirty_map2[inode] = True
 
 	# util funcs
 	# ==========
@@ -180,7 +187,7 @@ class Journal:
 		i = 0
 		while i < len_history:
 			logEntry = compacted_history[i]
-			src_path = self.disk.toSrcPath(logEntry.path)
+			src_path = self.disk.trans.toSrc(logEntry.path)
 			i = self.__replayFile_Op(logEntry.op, src_path, logEntry, i)
 			if i % 25 == 0:
 				print(f'Processed {i} items')
@@ -191,6 +198,10 @@ class Journal:
 		self.__inode_dirty_map2 = {}
 		self.__last_fds = Journal.__EMPTY_FDS
 		self.__last_remote_path = ""
+		self.bytes_unwritten = 0
+
+		# TODO: might be a good place to rearrange some data that was accessed longest ago to make some room for buffers
+		#	aka let some buffer
 
 	def getDirtyPaths(self) -> tuple[list[Path], int]:
 		dirty_paths: list[Path] = []
@@ -209,45 +220,73 @@ class Journal:
 	def isCompletelyClean(self) -> bool:
 		return self.__inode_dirty_map2 == {}
 
+	def __markDirty(self, inode: int) -> None:
+		# only save the orginal file size
+		if not self.isDirty(inode):
+			self.__inode_dirty_map2[inode] = self.vfs.inode_path_map[inode].entry.st_size
+
 	# public api
 	# ==========
 
-	def create(self, inode: int, path: str, flags: int) -> None:
+	def log_create(self, inode: int, path: str, flags: int) -> None:
 		self.__markDirty(inode)
-		e: LogEntry = LogEntry(File_Ops.CREATE, inode, self.disk.toCachePath(path).__str__())
+		e: LogEntry = LogEntry(File_Ops.CREATE, inode, self.disk.trans.toTmp(path).__str__())
 		e.flags = flags
 		self.__history.append(e)
 
-	def write(self, inode: int, offset: int, bytes_written: int) -> None:
+	def log_write(self, inode: int, offset: int, bytes_written: int) -> None:
 		self.__markDirty(inode)
 		e: LogEntry = LogEntry(File_Ops.WRITE, inode, self.vfs.inode_to_cpath(inode).__str__())
 		e.writes = (offset, bytes_written)
 		self.__history.append(e)
 
-	def flush(self, inode: int, fh: int) -> None:
+	def log_flush(self, inode: int, fh: int) -> None:
+		"""Re-calculates unwritten"""
 		# TODO: sync up later (timer would probably be the best choice or
 		#  		some kind of check if there is almost no space available on underlying cache disk)
 		# special case if we enable renaming things:
 		# log.warning(f'Not implemented')
-		pass
 
-	def rename(self, inode: int, path_old: str, path_new: str) -> None:
+		# oh actually we can just diff for the size lol
+		curr_size = cast(FileInfo, self.vfs.get_FileInfo(inode)).entry.st_size
+		prev_size = self.__inode_dirty_map2[inode]
+
+		self.bytes_unwritten += (curr_size - prev_size)
+		self.__inode_dirty_map2[inode] = curr_size
+
+	def log_rename(self, inode: int, path_old: str, path_new: str) -> None:
 		self.__markDirty(inode)
 		e: LogEntry = LogEntry(File_Ops.RENAME, inode, path_old)
 		e.path_new = path_new
 		self.__history.append(e)
 
-	def unlink(self, inode: int, path: str) -> None:
+	def log_unlink(self, inode_p: int, inode: int, path: str) -> None:
+		def unlink_inode_in_parent_directory() -> None:
+			# inode from /tmp might not be present here anymore but file isnt deleted in src
+			info_p: DirInfo = cast(DirInfo, self.vfs.inode_path_map[inode_p])
+			assert isinstance(info_p, DirInfo), "Type mismatch"
+			assert inode in info_p.children, f"{inode} not in {info_p.children}, path {path}"
+			info_p.children.remove(inode)
+			self.disk.untrack(path)
+
+		unlink_inode_in_parent_directory()
 		self.__markDirty(inode)
+		self.__markDirty(inode_p)
 		e: LogEntry = LogEntry(File_Ops.UNLINK, inode, path)
+
+		size: int = 0
+		# TODO:
+		#  	path has to be checked if it's in cache tracked
+		self.src_bytes_avail += size
 		self.__history.append(e)
 
-	def rmdir(self, inode: int, path: str) -> None:
+	def log_rmdir(self, inode: int, path: str) -> None:
 		# same as unlink of a file as non empty dirs would already have raised an error
-		self.unlink(inode, path)
+		self.log_unlink(inode, path)
 
-	def mkdir(self, inode: int, path: str, mode: int) -> None:
+	def log_mkdir(self, inode_p: int, inode: int, path: str, mode: int) -> None:
 		self.__markDirty(inode)
-		e: LogEntry = LogEntry(File_Ops.MKDIR, 0, path)
+		self.__markDirty(inode_p)
+		e: LogEntry = LogEntry(File_Ops.MKDIR, path=path)
 		e.mode = mode
 		self.__history.append(e)

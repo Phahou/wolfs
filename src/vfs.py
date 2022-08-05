@@ -8,22 +8,21 @@ embed = embed
 import os
 import pyfuse3
 import errno
-import stat as stat_m
 from pyfuse3 import FUSEError
 from collections import defaultdict
 from pathlib import Path
 import logging
 log = logging.getLogger(__name__)
-from disk import CachePath
+from disk import PathTranslator
 from util import Col, CallStackAware, sizeof, formatByteSize
-from typing import Union, Final, cast
+from typing import Union, cast
 from fileInfo import FileInfo, DirInfo
 from errors import SOFTLINK_DISABLED_ERROR, HARDLINK_DIR_ILLEGAL_ERROR
 
 
 ########################################################################################################################
 
-class VFS(CallStackAware):
+class VFS(PathTranslator, CallStackAware):
 	__next_inode: int = pyfuse3.ROOT_INODE
 
 	def __inode_generator(self) -> int:
@@ -33,24 +32,20 @@ class VFS(CallStackAware):
 
 	# I need to save all os operations in this so if a os.lstat is called I can pretend I actually know the stuff
 	def __init__(self, sourceDir: Path, cacheDir: Path):
-		self.sourceDir: Final[Path] = Path(sourceDir)
-		self.cacheDir: Final[Path] = Path(cacheDir)
+		super().__init__(sourceDir, cacheDir)
+		#self.sourceDir: Final[Path] = Path(sourceDir)
+		#self.cacheDir: Final[Path] = Path(cacheDir)
 
 		# TODO: make btree out of this datatype with metafile stored somewhere
 		self.inode_path_map: dict[int, Union[FileInfo, DirInfo]] = dict()
 
-		# inode related:
+		# inode related: (used for memory management)
 		self._lookup_cnt: dict[int, int] = defaultdict(lambda: 0)  # reference counter for pyfuse3
-		self._fd_inode_map: dict[int, int] = dict()  # maps file descriptors to inodes
 		self._inode_fd_map: dict[int, int] = dict()  # maps inodes to file descriptors
+
+		# unused by this class only declared here
+		self._fd_inode_map: dict[int, int] = dict()  # maps file descriptors to inodes
 		self._fd_open_count: dict[int, int] = dict()  # reference counter if inode is still open (being used)
-
-	# shorthands
-	def __toCachePath(self, path: Union[str, Path]) -> Path:
-		return CachePath.toDestPath(self.sourceDir, self.cacheDir, path)
-
-	def __toSrcPath(self, path: Union[str, Path]) -> Path:
-		return CachePath.toDestPath(self.cacheDir, self.sourceDir, path)
 
 	def already_open(self, inode: int) -> bool:
 		return inode in self._inode_fd_map
@@ -65,8 +60,8 @@ class VFS(CallStackAware):
 		del self.inode_path_map[inode]
 
 	def set_inode_path(self, inode: int, path: Union[str, Path]) -> None:
-		self.inode_path_map[inode].src = self.__toSrcPath(path)
-		self.inode_path_map[inode].cache = self.__toCachePath(path)
+		self.inode_path_map[inode].src = self.toSrc(path)
+		self.inode_path_map[inode].cache = self.toTmp(path)
 
 	# def set_inode_entry(self, inode: int, entry: pyfuse3.EntryAttributes) -> None:
 	#	self.inode_path_map[inode].entry = entry
@@ -108,7 +103,7 @@ class VFS(CallStackAware):
 		if old_inode:
 			return old_inode[0][0]
 		else:
-			# inode doesnt exist yet (not found)
+			# inode doesn't exist yet (not found)
 			return 0
 
 	def addFilePath(self, inode_p: int, inode: int, path: str, entry: pyfuse3.EntryAttributes) -> None:
@@ -122,23 +117,27 @@ class VFS(CallStackAware):
 		if inode not in info_p.children:
 			info_p.children.append(inode)
 
-	def add_Directory(self, inode: int, path: str, entry: pyfuse3.EntryAttributes, child_inodes: list[int]) -> DirInfo:
+	def add_Directory(self, inode_p: int, inode: int, path: str, entry: pyfuse3.EntryAttributes, child_inodes: list[int]) -> DirInfo:
 		# TODO: needs rework to also include inode_p
+		assert inode != inode_p
 		assert inode not in child_inodes
 		assert entry.st_ino == inode
 		assert Path(path).is_dir()
 
 		self._lookup_cnt[inode] += 1
-		src_p, cache_p = self.__toSrcPath(path), self.__toCachePath(path)
+		src_p, cache_p = self.toSrc(path), self.toTmp(path)
 
 		directory = DirInfo(src_p, cache_p, entry, child_inodes=child_inodes)
 		self.inode_path_map[inode] = directory
+		if dir_info := cast(DirInfo, self.inode_path_map.get(inode_p)):
+			dir_info.children.append(inode)
+
 		return directory
 
 	def add_path(self, inode: int, path: str, file_attrs: pyfuse3.EntryAttributes = pyfuse3.EntryAttributes()) -> None:
 		assert inode == file_attrs.st_ino, f'inode and file_attrs.st_ino have to be the same as file_attrs.st_ino are for lookup'
 		self._lookup_cnt[inode] += 1
-		src_p, cache_p = self.__toSrcPath(path), self.__toCachePath(path)
+		src_p, cache_p = self.toSrc(path), self.toTmp(path)
 
 		# With hardlinks, one inode may map to multiple paths.
 		if inode not in self.inode_path_map:
@@ -171,8 +170,10 @@ class VFS(CallStackAware):
 		else:
 			path_or_fh = fh
 		FileInfo.setattr(attr, fields, path_or_fh, ctx)
-
-		return await self.getattr(inode)
+		# todo check if attr now is attr after self.getattr
+		new_attr = self.getattr(inode)
+		assert attr != new_attr, "attr are equal ?"
+		return await new_attr
 
 	async def getattr(self, inode: int, ctx: pyfuse3.RequestContext = None) -> pyfuse3.EntryAttributes:
 		if self.already_open(inode):  # if isOpened(inode):

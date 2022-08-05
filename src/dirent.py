@@ -1,6 +1,6 @@
 # directory methods
 # =================
-from src.xattrs import XAttrsOps
+from xattrs import XAttrsOps
 from vfsops import VFSOps, log
 import os
 import os.path
@@ -22,15 +22,9 @@ class DirentOps(XAttrsOps):
 
 	async def mkdir(self, inode_p: int, name: str, mode: int, ctx: pyfuse3.RequestContext) -> pyfuse3.EntryAttributes:
 		# in cache:
-		#		mkdir normally, update DirInfo of parent and create a DirInfo for new ino
+		#		- [x] mkdir normally, update DirInfo of parent and create a DirInfo for new ino
 		# in src:
-		#		log that it needs to be made if it was possible in cache
-		# might cause problems:
-		# 	- no disk space in:
-		# 		- src   but in cache
-		#		- cache but in src
-		#		- cache & src
-		#
+		#		- [x] log that it needs to be made as there is enough space and it was possible in cache (mode check)
 		# softlinks dont need to be regarded as they dont come up here
 		#
 		# exec:
@@ -43,7 +37,6 @@ class DirentOps(XAttrsOps):
 		#	5. log to journal and sync later (assumption): no one modifies the directory on the backend
 		#	6. done
 		def validity_check():
-
 			# abort if directory already exists (we have to check this virtually
 			# as Path.exists() might say no although it already exists in the src )
 			if self.vfs.getInodeOf(cpath, inode_p):
@@ -51,33 +44,46 @@ class DirentOps(XAttrsOps):
 							f"  mkdir({parent_path},{name},{hex(mode)})")
 				raise FUSEError(errno.EEXIST)
 
-			# 2. check for disk space in _cache_
-			# TODO: checks for cache disk but not src
-			#		might need another module as we arent currently tracking free space on the backing store
-			if not self.disk.canReserve(self.disk.MIN_DIR_SIZE):
-				raise FUSEError(errno.ENOSPC)
+			MIN_DIR_SIZE: Final[int] = self.disk.MIN_DIR_SIZE
+			bytes_avail: Final[int] = self.journal.src_bytes_avail
+			cache_ok: bool = self.disk.canReserve(MIN_DIR_SIZE)
 
+			bytes_unwritten = self.journal.bytes_unwritten
+			src_ok: bool = (bytes_unwritten + MIN_DIR_SIZE) < bytes_avail
+
+			if cache_ok and src_ok:
+				return
+			elif not cache_ok and src_ok:
+				self.remote.makeAvailable()
+				self.journal.flushCompleteJournal()
+			else:
+				raise FUSEError(errno.ENOSPC)
 
 		log.info(f" {Col(name)} in {Col(inode_p)} with mode {Col.file(mode & ctx.umask)}")
 
 		# 1. get info of inode_p and stuff
 		parent_path = self.vfs.inode_to_cpath(inode_p)
 		cpath = os.path.join(parent_path, fsdecode(name))
+
+		# 2. check if enough disk space
 		validity_check()
 
 		try:
-			# can succeed as dir might not be present in cache
+			# 3. try to mkdir
 			os.mkdir(cpath, mode=(mode & ~ctx.umask))
 			os.chown(cpath, ctx.uid, ctx.gid)
 		except OSError as exc:
 			raise FUSEError(exc.errno)
 
-		# update book-keeping
+		# 4. update book-keeping
 		attr = FileInfo.getattr(path=cpath)
 		attr.st_ino = self.disk.track(cpath)
-		self.vfs.addFilePath(inode_p, attr.st_ino, cpath, attr)
-		self.journal.mkdir(attr.st_ino, cpath, mode)
+		self.vfs.add_Directory(inode_p, attr.st_ino, cpath, attr)
+		assert isinstance(self.vfs.inode_path_map[attr.st_ino], DirInfo), f"Logical error: {attr.st_ino} should be of type DirInfo"
+		self.journal.log_mkdir(inode_p, attr.st_ino, cpath, mode)
 
+		# YOU ARE HERE
+		# commit to git perform tests check that everything works update to-do file
 		return attr
 
 	async def rmdir(self, inode_p: int, name: str, ctx: pyfuse3.RequestContext) -> None:
@@ -85,7 +91,7 @@ class DirentOps(XAttrsOps):
 		#       die.net: Upon successful completion, the rmdir() function shall mark for update the st_ctime and st_mtime fields of the parent directory.
 		#       -> update entries
 
-		inode_p = self.mnt_ino_translation(inode_p)
+		inode_p = self[inode_p]
 
 		parent = self.vfs.inode_to_cpath(inode_p)
 		cpath = os.path.join(parent, fsdecode(name))
@@ -122,12 +128,12 @@ class DirentOps(XAttrsOps):
 			pass
 			#if self.disk.isInBackend(inode):
 
-		self.journal.rmdir(inode, cpath)
+		self.journal.log_rmdir(inode, cpath)
 		if self.vfs.inLookupCnt(inode):
 			self._forget_path(inode, cpath)
 
 	async def opendir(self, inode: int, ctx: pyfuse3.RequestContext) -> int:
-		inode = self.mnt_ino_translation(inode)
+		inode = self[inode]
 		dirent: DirInfo = cast(DirInfo, self.vfs.inode_path_map[inode])
 		log.info(f"{Col.path(self.vfs.inode_to_cpath(inode))} contains: {Col(dirent.children)}")
 		# ctx contains gid, uid, pid and umask
