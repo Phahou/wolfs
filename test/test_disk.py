@@ -20,11 +20,6 @@ from test.test_config import REMOTE, MNT_DIR, DATA_DIR
 from src.disk import Disk
 
 TEST_FILE = __file__
-tmp_dir = __file__ + "-tmp"
-os.mkdir(tmp_dir)
-EMPTY_DIRECTORY_SIZE = os.stat(tmp_dir).st_size
-os.rmdir(tmp_dir)
-del tmp_dir
 
 with open(TEST_FILE, 'rb') as fh:
 	TEST_DATA = fh.read()
@@ -72,6 +67,7 @@ def make_test_file(path):
 	with open(path, "w") as f:
 		f.write(str(TEST_DATA, 'utf8'))
 
+
 def get_src_cache_directory_pair(tmpdir_factory):
 	tmpdir_source = tmpdir_factory.mktemp("src")
 	tmpdir_cache = tmpdir_factory.mktemp("cache")
@@ -109,7 +105,6 @@ class TestDisk:
 		os.rmdir(tmpdir_source)
 		nodir(lambda: prep_Disk(sourceDir=tmpdir_source, cacheDir=tmpdir_cache))
 
-
 	def test_toPathFuncs(self, tmpdir_factory):
 		tmpdir_source, tmpdir_cache = get_src_cache_directory_pair(tmpdir_factory)
 		disk = prep_Disk(tmpdir_source, tmpdir_cache)
@@ -137,7 +132,6 @@ class TestDisk:
 		assert disk.trans.toSrc(subdir_p) == disk.trans.toSrc(subdir)
 		assert disk.trans.toTmp(subdir_p) == disk.trans.toTmp(subdir)
 		assert disk.trans.toRoot(subdir_p) == disk.trans.toRoot(subdir)
-
 
 	def test_canStore(self, tmpdir_factory):
 		tmpdir_source, tmpdir_cache = get_src_cache_directory_pair(tmpdir_factory)
@@ -178,10 +172,10 @@ class TestDisk:
 		os.mkdir(subdir_not_enough_root)
 		subdir_not_enough: Path = Path(os.path.join(subdir_not_enough_root, name_generator()))
 		pseudo_file(subdir_not_enough, 4 * DIRECOTRIES_PER_MEGABYTE)
-		assert not disk.canStore(subdir_not_enough), f"Could store {not_enough}, although there shouldn't be enough space!"
+		assert not disk.canStore(
+			subdir_not_enough), f"Could store {not_enough}, although there shouldn't be enough space!"
 		os.remove(subdir_not_enough)
 		os.rmdir(subdir_not_enough_root)
-
 
 	def test_copystat(self, tmpdir_factory):
 		tmpdir_source, _ = get_src_cache_directory_pair(tmpdir_factory)
@@ -209,28 +203,47 @@ class TestDisk:
 		os.remove(src)
 		os.rmdir(src_dir)
 
-	@pytest.mark.skip
 	def test_mkdir_p(self, tmpdir_factory):
 		tmpdir_source, tmpdir_cache = get_src_cache_directory_pair(tmpdir_factory)
+
 		disk = prep_Disk(tmpdir_source, tmpdir_cache, maxCacheSize=1)
 
 		# generate a bunch of random nested folders
 		src_dir: Path = Path(os.path.join(tmpdir_source, name_generator()))
 
-		SUBFOLDERS = 2
-		for i in range(SUBFOLDERS - 1):
-			src_dir.mkdir()
+		def create_a_bunch_of_subdirs(src_dir: Path, amount: int) -> Path:
+			for i in range(amount):
+				try:
+					src_dir.mkdir()
+				except FileExistsError:
+					pass
+				nano_sleep()
+				src_dir: Path = Path(os.path.join(src_dir, name_generator()))
 			nano_sleep()
-			src_dir: Path = Path(os.path.join(src_dir, name_generator()))
-		nano_sleep()
-		src_dir.mkdir()
+			src_dir.mkdir()
+			return src_dir
 
-		# perform cpdir()
+		# create root
+		src_dir = create_a_bunch_of_subdirs(src_dir, 0)
 		actual_size, added_folders = disk.mkdir_p(src_dir)
+		print(added_folders)
+		assert len(added_folders) == 1
+		expected_size = os.stat(src_dir).st_size
+		assert actual_size == expected_size, f"Actual size and book-keeped size mismatch {actual_size} {expected_size}"
+
+		# create 2 subdirs
+		SUBFOLDERS = 2
+		src_dir = create_a_bunch_of_subdirs(src_dir, SUBFOLDERS)
+		# perform cpdir().
+		actual_size, added_folders = disk.mkdir_p(src_dir)
+		print(added_folders)
 		assert len(added_folders) == SUBFOLDERS
 
 		# result should have the same size as original directory
-		expected_size = SUBFOLDERS * EMPTY_DIRECTORY_SIZE
+		expected_size = 0
+		for i in added_folders:
+			expected_size += os.stat(i).st_size
+
 		assert actual_size == expected_size, f"Actual size and book-keeped size mismatch {actual_size} {expected_size}"
 
 		def check_attrs(s_stat, f_stat):
@@ -245,6 +258,9 @@ class TestDisk:
 			check_attrs(s_stat, f_stat)
 			src_dir = src_dir.parent
 
+		# cleanup
+		for d in reversed(added_folders):  # skip root dir
+			d.rmdir()
 
 	def test_getSize(self):
 		# later when symbolic links are added
@@ -278,33 +294,27 @@ class TestDisk:
 		ino2 = disk[path2]
 		assert ino < ino2, f"The generator of inodes should only generate larger inos"
 
+	# 5. case: foreign translation update of inos
+	# skip for now (what did I mean by that ?)
 
-# 5. case: foreign translation update of inos
-# skip for now (what did I mean by that ?)
-
-###################################################
-# Class tests
-###################################################
+	###################################################
+	# Class tests
+	###################################################
 
 	def test__cp_path(self):
 		pass
 
-
 	def test_track(self):
 		pass
-
 
 	def test_untrack(self):
 		pass
 
-
 	def test_makeRoomForPath(self):
 		pass
 
-
 	def test_cp2Cache(self):
 		pass
-
 
 	def test_rebuildCacheDir(self):
 		pass
