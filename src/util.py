@@ -14,7 +14,6 @@ from datetime import datetime
 import inspect
 
 
-
 # this can be ignored fully as logging supports this too.....
 # https://stackoverflow.com/questions/533048/how-to-log-source-file-name-and-line-number-in-python
 class CallStackAware:
@@ -73,10 +72,10 @@ def formatByteSize(b: float) -> str:
 class MaxPrioQueue(PriorityQueue):
 	"""
 	A Max Heap Queue:
-	Shouldnt be used if negative and positive indeces are mixed
+	Shouldn't be used if negative and positive indeces are mixed
 	"""
 
-	# As I dont want to fiddle around with inverting items
+	# As I don't want to fiddle around with inverting items
 	# while I have other problems at hand
 	def push_nowait(self, item: tuple) -> None:
 		"""Same as PriorityQueue.put_nowait()"""

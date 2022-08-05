@@ -164,8 +164,8 @@ class TestDisk:
 		for i in range(1, 5):
 			subdir_enough: Path = Path(os.path.join(previous_name.__str__() + '/', name_generator()))
 			pseudo_file(subdir_enough, 4 * (DIRECOTRIES_PER_MEGABYTE - i))
-			assert disk.canStore(Path(
-				subdir_enough)), f"Couldn't store {subdir_enough}, although there's enough space even for the needed directories in between!"
+			assert_message = f"Couldn't store {subdir_enough}, although there's space for directories in between!"
+			assert disk.canStore(Path(subdir_enough)), assert_message
 			os.remove(subdir_enough)
 			previous_name = subdir_enough
 			os.mkdir(previous_name)
@@ -178,7 +178,7 @@ class TestDisk:
 		os.mkdir(subdir_not_enough_root)
 		subdir_not_enough: Path = Path(os.path.join(subdir_not_enough_root, name_generator()))
 		pseudo_file(subdir_not_enough, 4 * DIRECOTRIES_PER_MEGABYTE)
-		assert not disk.canStore(subdir_not_enough), f"Could store {not_enough} although there shouldn't be enough space!"
+		assert not disk.canStore(subdir_not_enough), f"Could store {not_enough}, although there shouldn't be enough space!"
 		os.remove(subdir_not_enough)
 		os.rmdir(subdir_not_enough_root)
 

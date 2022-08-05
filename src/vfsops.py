@@ -15,12 +15,14 @@ from fileInfo import FileInfo, DirInfo
 from pathlib import Path
 from typing import Final, cast, Optional
 import re
-from remote import RemoteNode # type: ignore
+from remote import RemoteNode  # type: ignore
 from journal import Journal
 from util import CallStackAware
 
 import logging
+
 log = logging.getLogger(__name__)
+
 
 # ======================================================================================================================
 # VFSOps
@@ -43,6 +45,7 @@ class PathOps(pyfuse3.Operations, CallStackAware):
 		self.vfs = VFS(sourceDir, cacheDir)
 		self.journal = Journal(self.disk, self.vfs, logFile)
 		self.remote = node
+
 	# path methods
 	# ============
 
@@ -71,14 +74,15 @@ class PathOps(pyfuse3.Operations, CallStackAware):
 			self.__fetchFile(self.disk.trans.toSrc(f), st_size)
 		return f
 
-	async def rename(self, inode_p_old: int, name_old: str, inode_p_new: int, name_new: str, flags: int, ctx: pyfuse3.RequestContext) -> None:
+	async def rename(self, inode_p_old: int, name_old: str, inode_p_new: int,
+					 name_new: str, flags: int, ctx: pyfuse3.RequestContext) -> None:
 		if flags != 0:
 			raise FUSEError(errno.EINVAL)
 
 		def rename_childs(childs: list[int], parent_new: str) -> None:
 			for child in childs:
 				child_info = self.vfs.inode_path_map[child]
-				cache: Path = child_info.cache # type: ignore
+				cache: Path = child_info.cache
 				assert isinstance(cache, Path), f"{self} {SOFTLINK_DISABLED_ERROR}"
 				self.vfs.inode_path_map[child].cache = Path(cache.__str__().replace(cache.parent.__str__(), parent_new))
 				if isinstance(child_info, DirInfo):
@@ -214,7 +218,8 @@ class BasicOps(PathOps):
 	# attr methods (from vfs)
 	# =======================
 
-	async def setattr(self, inode: int, attr: pyfuse3.EntryAttributes, fields: pyfuse3.SetattrFields, fh: int, ctx: pyfuse3.RequestContext) -> pyfuse3.EntryAttributes:
+	async def setattr(self, inode: int, attr: pyfuse3.EntryAttributes, fields: pyfuse3.SetattrFields, fh: int,
+					  ctx: pyfuse3.RequestContext) -> pyfuse3.EntryAttributes:
 		return await self.vfs.setattr(inode, attr, fields, fh, ctx)
 
 	async def getattr(self, inode: int, ctx: pyfuse3.RequestContext = None) -> pyfuse3.EntryAttributes:
@@ -260,7 +265,8 @@ class BasicOps(PathOps):
 
 		return pyfuse3.FileInfo(fh=fd)
 
-	async def create(self, inode_p: int, name: str, mode: int, flags: int, ctx: pyfuse3.RequestContext) -> tuple[pyfuse3.FileInfo, pyfuse3.EntryAttributes]:
+	async def create(self, inode_p: int, name: str,mode: int, flags: int,
+					 ctx: pyfuse3.RequestContext) -> (pyfuse3.FileInfo, pyfuse3.EntryAttributes):
 		inode_p = self[inode_p]
 		cpath: str = os.path.join(self.vfs.inode_to_cpath(inode_p), fsdecode(name))
 		log.debug(f'{Col(cpath)} in {Col(inode_p)}')
@@ -375,6 +381,7 @@ class BasicOps(PathOps):
 		log.warning(f' Not implemented')
 		raise FUSEError(errno.ENOSYS)
 
+
 class NodeOps(BasicOps):
 	def printAllInodes(self, inode_p=Disk.ROOT_INODE) -> None:
 		item = self.vfs.inode_path_map[inode_p]
@@ -405,7 +412,8 @@ class NodeOps(BasicOps):
 		self.journal.flushCompleteJournal()
 		return stat_
 
-	async def mknod(self, inode_p: int, name: str, mode: int, rdev: int, ctx: pyfuse3.RequestContext) -> pyfuse3.EntryAttributes:
+	async def mknod(self, inode_p: int, name: str, mode: int, rdev: int,
+					ctx: pyfuse3.RequestContext) -> pyfuse3.EntryAttributes:
 		# create special or ordinary file
 		# mostly used for fifo / pipes but nowadays mkfifo would be better suited for that
 		# mostly rare use cases

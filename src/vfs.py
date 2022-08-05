@@ -30,7 +30,7 @@ class VFS(PathTranslator, CallStackAware):
 		self.__next_inode += 1
 		return inode
 
-	# I need to save all os operations in this so if a os.lstat is called I can pretend I actually know the stuff
+	# I need to save all os operations in this so if os.lstat is called I can pretend I actually know the stuff
 	def __init__(self, sourceDir: Path, cacheDir: Path):
 		super().__init__(sourceDir, cacheDir)
 		#self.sourceDir: Final[Path] = Path(sourceDir)

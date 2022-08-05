@@ -112,7 +112,7 @@ class InodeTranslator(PathTranslator, DiskBase):
 		# for mnt_ino_translation and path_to_ino mapping functions
 		#self.__mnt_ino2st_ino: dict[int, int] = {FUSE_ROOT_INODE: self.ROOT_INODE, self.ROOT_INODE: self.ROOT_INODE}
 		#self.__tmp_ino2st_ino: dict[int, int] = {FUSE_ROOT_INODE: self.ROOT_INODE, self.ROOT_INODE: self.ROOT_INODE}
-		self.__last_ino: int = 1  # as the first ino is always 2 (ino 1 is for bad blocks but fuse doesnt act that way)
+		self.__last_ino: int = 1  # as the first ino is always 2 (ino 1 is for bad blocks but fuse doesn't act that way)
 		self.__freed_inos: set[int] = set()
 		self.path_ino_map: dict[str, int] = dict()
 
@@ -165,7 +165,7 @@ class AbstractDisk(Cache):
 		return self.trans.sourceDir
 
 	@sourceDir.setter
-	def sourceDir(self, value):
+	def sourceDir(self, _):
 		assert False, 'sourceDir will never be set after instanciation!'
 
 	@property
@@ -173,7 +173,7 @@ class AbstractDisk(Cache):
 		return self.trans.cacheDir
 
 	@cacheDir.setter
-	def cacheDir(self, value):
+	def cacheDir(self, _):
 		assert False, 'cacheDir will never be set after instanciation!'
 
 	def __init__(self,  sourceDir: Path, cacheDir: Path, maxCacheSize: int, noatime: bool = True, cacheThreshold: float = 0.99):
@@ -210,7 +210,7 @@ class Disk(AbstractDisk):
 
 #	def _rebuildCacheDir(self) -> None:
 #		"""
-#		Rebuild the internal book-keeping ( `self.__curent_CacheSize` , `self.in_cache` ) variables\n
+#		Rebuild the internal bookkeeping ( `self.__curent_CacheSize` , `self.in_cache` ) variables\n
 #		based on the contents currently in `self.cacheDir`
 #		"""
 #		self.in_cache.clear()
@@ -310,11 +310,11 @@ class Disk(AbstractDisk):
 
 	def track(self, path: str, reuse_ino=0) -> int:
 		"""
-		Add `path` to internal filing structure and reserve it's disk space
+		Add `path` to internal filing structure and reserve its disk space
 		reuse_ino: re-use an old inode
 		"""
 
-		# handling of create and mkdir (files dont exist yet so os.stat(path_) will throw an error)
+		# handling of create and mkdir (files don't exist yet so os.stat(path_) will throw an error)
 		path_: str = self.trans.toSrc(path).__str__()
 		if not os.path.exists(path_):
 			path_ = self.trans.toTmp(path).__str__()
@@ -335,7 +335,7 @@ class Disk(AbstractDisk):
 		else:
 			self.in_cache[timestamp] = (src_path, size)
 
-		# update book-keeping
+		# update bookkeeping
 		self.path_timestamp[src_path] = timestamp
 		self._cached_inos[ino] = True
 		self._current_CacheSize += size
@@ -384,7 +384,7 @@ class Disk(AbstractDisk):
 		:param force: Delete files if necessary
 		:param open_paths: paths which have an open file descriptor and can't be closed as they are in use
 		:raises NotEnoughSpaceError: If there isn't enough space to save `path` and `force` wasn't set
-		:raises FUSEError(errno.EDQUOT): if all non open files were deleted and there still isnt enough room for `path`
+		:raises FUSEError(errno.EDQUOT): if all non-open files were deleted and there still isn't enough room for `path`
 		:returns: Cache path of copied file/dir
 		Copy `file` and its meta-data into Cache. If `force` is set it deletes least recently used files until enough space is available.
 
@@ -401,7 +401,7 @@ class Disk(AbstractDisk):
 			addedDirsSize, addedFolders = self.__cp_path(path, dest)
 			self._current_CacheSize += addedDirsSize
 			# folders which are created by cp2Dir are untracked and should be tracked...
-			# elements in cache doesnt model reality (too few entries too many undocumented)
+			# elements in cache doesn't model reality (too few entries too many undocumented)
 			for parent in addedFolders:
 				self.trans.path_to_ino(parent)
 				self.track(parent.__str__())
@@ -440,7 +440,7 @@ class Disk(AbstractDisk):
 
 			cpath: Path = Path(self.trans.toTmp(src_path))
 
-			# skip open files (we cant sync and close them as they might be written / read from)
+			# skip open files (we can't sync and close them as they might be written / read from)
 			if cpath in open_paths:
 				continue
 
@@ -452,10 +452,10 @@ class Disk(AbstractDisk):
 				try:
 					os.rmdir(cpath)
 				except OSError:
-					# directory isnt empty though I dont know what to do at this point
-					# as re-adding it isnt a option ( directory entries only change if files are added or deleted so)
+					# directory isn't empty though I don't know what to do at this point
+					# as re-adding it isn't an option ( directory entries only change if files are added or deleted so)
 					# furthermore it would break the heap
-					# at least dont let the CacheSize get corrupted by this
+					# at least don't let the CacheSize get corrupted by this
 					self._current_CacheSize += size
 
 	def __cp_path(self, src: Path_str, dst: Path_str) -> tuple[int, list[Path]]:
@@ -474,7 +474,7 @@ class Disk(AbstractDisk):
 		if src == dst:
 			# same File no need for copying,
 			# file should exist already too as self.__canStore would throw errors otherwise
-			# just give 0 back as we effictively wont do anything and just skip it
+			# just give 0 back as we effictively won't do anything and just skip it
 			return 0, []
 
 		if src.is_dir():
@@ -493,7 +493,7 @@ class Disk(AbstractDisk):
 
 	@staticmethod
 	def copystat(src: Path_str, dst: Path_str) -> None:
-		"""Book-keeping of file-Attributes"""
+		"""Bookkeeping of file-Attributes"""
 		shutil.copystat(src, dst)
 
 	# ===============

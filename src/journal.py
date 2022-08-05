@@ -85,7 +85,7 @@ class Journal:
 		assert remote.exists(), "Writing before the file was created ???"
 
 		fd_cache, fd_remote = self.__last_fds
-		# only close/write to files if we really need to.
+		# only close/write into files if we really need to.
 		if self.__last_remote_path != remote:
 			if self.__last_fds != Journal.__EMPTY_FDS:
 				os.fsync(fd_remote)
@@ -164,7 +164,7 @@ class Journal:
 
 	def flushCompleteJournal(self) -> None:
 		# empty out unneeded ops if inodes was deleted unlinked entries
-		# Doesnt sort out rewrites of files under a different inode, read / writes will be ok though
+		# Doesn't sort out rewrites of files under a different inode, read / writes will be ok though
 
 		unlink_entries = list(filter(lambda x: x.op == File_Ops.UNLINK, self.__history))
 		unlink_inos = list(map(lambda x: x.inode, unlink_entries))
@@ -247,7 +247,7 @@ class Journal:
 		# special case if we enable renaming things:
 		# log.warning(f'Not implemented')
 
-		# oh actually we can just diff for the size lol
+		# oh, actually we can just diff for the size lol
 		curr_size = cast(FileInfo, self.vfs.get_FileInfo(inode)).entry.st_size
 		prev_size = self.__inode_dirty_map2[inode]
 
@@ -262,7 +262,7 @@ class Journal:
 
 	def log_unlink(self, inode_p: int, inode: int, path: str) -> None:
 		def unlink_inode_in_parent_directory() -> None:
-			# inode from /tmp might not be present here anymore but file isnt deleted in src
+			# inode from /tmp might not be present here anymore but file isn't deleted in src
 			info_p: DirInfo = cast(DirInfo, self.vfs.inode_path_map[inode_p])
 			assert isinstance(info_p, DirInfo), "Type mismatch"
 			assert inode in info_p.children, f"{inode} not in {info_p.children}, path {path}"
@@ -281,7 +281,7 @@ class Journal:
 		self.__history.append(e)
 
 	def log_rmdir(self, inode: int, path: str) -> None:
-		# same as unlink of a file as non empty dirs would already have raised an error
+		# same as unlink of a file as non-empty dirs would already have raised an error
 		self.log_unlink(inode, path)
 
 	def log_mkdir(self, inode_p: int, inode: int, path: str, mode: int) -> None:
