@@ -7,7 +7,7 @@ from IPython import embed
 embed = embed
 
 import os
-from remote import RemoteNode # type: ignore
+from src.remote import RemoteNode # type: ignore
 import faulthandler
 
 faulthandler.enable()
@@ -17,13 +17,13 @@ from logging import getLogger
 
 log = getLogger(__name__)
 
-from util import formatByteSize, Col, MaxPrioQueue
-from vfsops import VFSOps
-from fileInfo import FileInfo, DirInfo
-from errors import NotEnoughSpaceError
+from src.libwolfs.util import Col, MaxPrioQueue
+from src.fsops.vfsops import VFSOps
+from src.libwolfs.fileInfo import FileInfo, DirInfo
+from src.libwolfs.errors import NotEnoughSpaceError
 import pickle
 from typing import Any, Final, cast
-from dirent import DirentOps
+from src.fsops.dirent import DirentOps
 
 def save_obj(obj: Any, name: Path) -> None:
 	with open(name, 'wb+') as f:

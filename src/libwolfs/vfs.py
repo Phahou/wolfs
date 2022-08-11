@@ -13,11 +13,11 @@ from collections import defaultdict
 from pathlib import Path
 import logging
 log = logging.getLogger(__name__)
-from disk import PathTranslator
-from util import Col, CallStackAware, sizeof, formatByteSize
+from src.libwolfs.disk import PathTranslator
+from src.libwolfs.util import Col, CallStackAware, sizeof, formatByteSize
 from typing import Union, cast
-from fileInfo import FileInfo, DirInfo
-from errors import SOFTLINK_DISABLED_ERROR, HARDLINK_DIR_ILLEGAL_ERROR
+from src.libwolfs.fileInfo import FileInfo, DirInfo
+from src.libwolfs.errors import SOFTLINK_DISABLED_ERROR, HARDLINK_DIR_ILLEGAL_ERROR
 
 
 ########################################################################################################################

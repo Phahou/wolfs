@@ -2,10 +2,9 @@
 
 # type: ignore
 
-from wakeonlan import send_magic_packet
 from icmplib import ping
 import trio
-from errors import MountError, WakeupError
+from src.libwolfs.errors import MountError, WakeupError
 from pathlib import Path
 
 import ctypes

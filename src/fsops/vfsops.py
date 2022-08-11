@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-from errors import SOFTLINK_DISABLED_ERROR
+from src.libwolfs.errors import SOFTLINK_DISABLED_ERROR
 import os
 import pyfuse3
 from pyfuse3 import ROOT_INODE as FUSE_ROOT_INODE
@@ -8,16 +8,16 @@ from pyfuse3 import ROOT_INODE as FUSE_ROOT_INODE
 import errno
 from pyfuse3 import FUSEError
 from os import fsdecode
-from disk import Disk, DiskBase
-from util import Col
-from vfs import VFS
-from fileInfo import FileInfo, DirInfo
+from src.libwolfs.disk import Disk, DiskBase
+from src.libwolfs.util import Col
+from src.libwolfs.vfs import VFS
+from src.libwolfs.fileInfo import FileInfo, DirInfo
 from pathlib import Path
 from typing import Final, cast, Optional
 import re
-from remote import RemoteNode  # type: ignore
-from journal import Journal
-from util import CallStackAware
+from src.remote import RemoteNode  # type: ignore
+from src.libwolfs.journal import Journal
+from src.libwolfs.util import CallStackAware
 
 import logging
 

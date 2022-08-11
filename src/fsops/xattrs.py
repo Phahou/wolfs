@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-from vfsops import VFSOps
+from src.fsops.vfsops import VFSOps
 import errno
 from pyfuse3 import FUSEError, RequestContext
 import logging

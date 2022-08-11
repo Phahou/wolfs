@@ -10,15 +10,14 @@ import logging
 
 import pyfuse3
 
-from fileInfo import DirInfo, FileInfo
+from src.libwolfs.fileInfo import DirInfo, FileInfo
 
 log = logging.getLogger(__name__)
 
 # custom imports
-from disk import Disk
-from vfs import VFS
-from util import Col, __functionName__
-from disk import Path_str
+from src.libwolfs.disk import Disk
+from src.libwolfs.vfs import VFS
+from src.libwolfs.util import Col, __functionName__
 from IPython import embed
 
 embed = embed

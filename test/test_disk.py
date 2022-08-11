@@ -11,7 +11,7 @@ from IPython import embed
 
 embed = embed
 import random
-from src.disk import Disk
+from src.libwolfs.disk import Disk
 
 TEST_FILE = __file__
 

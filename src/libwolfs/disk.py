@@ -12,8 +12,8 @@ import sys
 import os
 import logging
 from pyfuse3 import FUSEError
-from src.util import Col, formatByteSize
-from src.errors import NotEnoughSpaceError, SOFTLINK_DISABLED_ERROR
+from src.libwolfs.util import Col, formatByteSize
+from src.libwolfs.errors import NotEnoughSpaceError, SOFTLINK_DISABLED_ERROR
 from typing import Union, Final, get_args
 from sortedcontainers import SortedDict
 

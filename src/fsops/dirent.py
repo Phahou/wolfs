@@ -1,17 +1,17 @@
 # directory methods
 # =================
-from xattrs import XAttrsOps
-from vfsops import VFSOps, log
+from src.fsops.xattrs import XAttrsOps
+from src.fsops.vfsops import log
 import os
 import os.path
 import pyfuse3
 import errno
 from pyfuse3 import FUSEError
 from os import fsencode, fsdecode
-from util import Col
-from fileInfo import FileInfo, DirInfo
+from src.libwolfs.util import Col
+from src.libwolfs.fileInfo import FileInfo, DirInfo
 from typing import Final, Union, cast
-from remote import RemoteNode  # type: ignore
+from src.remote import RemoteNode  # type: ignore
 
 class DirentOps(XAttrsOps):
 

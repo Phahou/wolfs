@@ -3,14 +3,14 @@
 # mypy ignore whole file
 # type: ignore
 
-from fsops import Wolfs as Operations
+from src.fsops.fsops import Wolfs as Operations
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 import pyfuse3
 import trio
 import sys
-from remote import RemoteNode
-from vfsops import VFSOps
-from util import Col
+from src.remote import RemoteNode
+from src.fsops.vfsops import VFSOps
+from src.libwolfs.util import Col
 
 DEBUG = False
 DEBUG_FUSE = False
