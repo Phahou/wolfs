@@ -218,7 +218,6 @@ class TestDisk:
 		# create root
 		src_dir = create_a_bunch_of_subdirs(src_dir, 0)
 		actual_size, added_folders = disk.mkdir_p(src_dir)
-		print(added_folders)
 		assert len(added_folders) == 1
 		expected_size = os.stat(src_dir).st_size
 		assert actual_size == expected_size, f"Actual size and book-keeped size mismatch {actual_size} {expected_size}"
@@ -228,7 +227,6 @@ class TestDisk:
 		src_dir = create_a_bunch_of_subdirs(src_dir, SUBFOLDERS)
 		# perform cpdir().
 		actual_size, added_folders = disk.mkdir_p(src_dir)
-		print(added_folders)
 		assert len(added_folders) == SUBFOLDERS
 
 		# result should have the same size as original directory
