@@ -116,6 +116,7 @@ def main():
         trio.run(pyfuse3.main)
     except KeyboardInterrupt:
         # log.debug('Unmounting due to Ctrl+C')
+        operations.save_internal_state()
         pyfuse3.close()
         unmounted = True
     except:

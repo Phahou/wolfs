@@ -38,11 +38,13 @@ def load_obj(path: Path) -> Any:
 class Wolfs(DirentOps):
 	enable_writeback_cache: Final[bool] = True
 	enable_acl: Final[bool] = True
+	__metadb: Path
 
 	def __init__(self, node: RemoteNode,
 				 sourceDir: str, cacheDir: str, metadb: str = '', logFile: Path = Path(VFSOps._STDOUT),
 				 noatime: bool = True, maxCacheSizeMB: int = VFSOps._DEFAULT_CACHE_SIZE):
 		super().__init__(node, Path(sourceDir), Path(cacheDir), Path(logFile), maxCacheSizeMB, noatime)
+		self.__metadb = Path(metadb)
 		# todo / idea:
 		#  - we could use the XDG / freedesktop spec for a the file location of the meta file (~/.config/wolfs/metaFile.db)
 		#  - maybe use same location for config options later on idk (~/.config/wolfs/config.ini)
@@ -55,7 +57,7 @@ class Wolfs(DirentOps):
 		# else:
 		# remote is offline our best guess is to believe that the cache is up to date
 		# todo: set to poll is remote is mounted and replace metafile if so
-		# self.restoreInternalState(Path(metadb))
+		self.load_internal_state(self.__metadb)
 		# try:
 		#	#self.vfs.inode_path_map = load_obj(metadb)
 		# except FileNotFoundError or EOFError:
@@ -64,7 +66,6 @@ class Wolfs(DirentOps):
 		#	# file was corrupted in last run
 		transfer_q = self.populate_inode_maps(self.disk.sourceDir)
 		self.copyRecentFilesIntoCache(transfer_q)
-		save_obj(self.vfs.inode_path_map, Path(metadb))
 
 	def populate_inode_maps(self, root: Path) -> MaxPrioQueue:
 		"""
@@ -88,24 +89,31 @@ class Wolfs(DirentOps):
 
 		i = 0
 		islink = os.path.islink
+		root_ino = self.disk.trans.path_to_ino(root)
+
 		# reminder that drives actually have very small inode numbers (e.g. 2 or 5)
 		for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
 			if islink(dirpath):
 				continue
 			dir_attrs = FileInfo.getattr(path=dirpath)
-			inode_p = self.path_to_ino(dirpath)
-			dir_attrs.st_ino = inode_p
+			dir_inode = self.disk.trans.path_to_ino(dirpath)
+			dir_attrs.st_ino = dir_inode
 			# print(inode_p, end=', ')
-			directory: DirInfo = self.vfs.add_Directory(inode_p, dirpath, dir_attrs, [])
+			i = dirpath.rfind('/')
 
-			push_to_queue(inode_p, dir_attrs)
+			inode_p: int = root_ino
+			if i > 0:
+				inode_p: int = self.disk.trans.path_to_ino(dirpath[:i])
+			directory: DirInfo = self.vfs.add_Directory(inode_p, dir_inode, dirpath, dir_attrs, [])
+
+			push_to_queue(dir_inode, dir_attrs)
 
 			for d in dirnames:
 				# only add child inodes here the subdirs will be walked through
 				subdir_path = os.path.join(dirpath, d)
 				if islink(subdir_path):
 					continue
-				directory.children.append(self.path_to_ino(subdir_path))
+				directory.children.append(self.disk.trans.path_to_ino(subdir_path))
 
 			# filepaths, fileattrs = [], []
 			for f in filenames:
@@ -113,13 +121,13 @@ class Wolfs(DirentOps):
 				if islink(filepath):
 					continue
 				file_attrs = FileInfo.getattr(path=filepath)
-				st_ino = self.path_to_ino(filepath)
+				st_ino = self.disk.trans.path_to_ino(filepath)
 				file_attrs.st_ino = st_ino
 				push_to_queue(st_ino, file_attrs)
-				assert self.path_to_ino(filepath) == self.path_to_ino(filepath), 'path != same path'
-				self.vfs.addFilePath(inode_p, st_ino, filepath, file_attrs)
+				assert self.disk.trans.path_to_ino(filepath) == self.disk.trans.path_to_ino(filepath), 'path != same path'
+				self.vfs.addFilePath(dir_inode, st_ino, filepath, file_attrs)
 				i = print_progress(i, 'add_path', st_ino, filepath)
-			i = print_progress(i, 'add_Directory', inode_p, dirpath)
+			i = print_progress(i, 'add_Directory', dir_inode, dirpath)
 
 		for k, v in self.vfs.inode_path_map.items():
 			assert k == v.entry.st_ino
@@ -150,17 +158,12 @@ class Wolfs(DirentOps):
 						purged_list.push_nowait((timestamp_i, (inode_i, size_i)))
 				transfer_q = purged_list
 
-		# print summary
-		diskUsage, usedCache, maxCache = self.disk.getCurrentStatus()
-		diskUsage = Col.path(f'{diskUsage:.8f}%')
-		usedCache = Col.path(f'{Col.BY}{formatByteSize(usedCache)}')
-		maxCache = Col.path(f'{formatByteSize(maxCache)}')
-		copySummary = \
-			f'Finished transfering {self.disk.getNumberOfElements()} elements.\nCache is now {diskUsage} full' + \
-			f' (used: {usedCache} / {maxCache})'
-		print(copySummary)
+		print(f'{Col.BW}Finished transfering. {self.disk.getSummary()}')
 
-	def restoreInternalState(self, metadb: Path) -> None:
+	def save_internal_state(self) -> None:
+		save_obj(self.vfs.inode_path_map, self.__metadb)
+
+	def load_internal_state(self, metadb: Path) -> None:
 		# load inodes_path_map from meta-data file
 		# if metadb.exists() and metadb.is_file():
 		# ...
@@ -168,8 +171,7 @@ class Wolfs(DirentOps):
 			self.vfs.inode_path_map = load_obj(metadb)
 			return
 		except FileNotFoundError or EOFError:
-			print(f'File not found {metadb}')
-		# except EOFError:
-		# file was corrupted in last run
-		transfer_q = self.populate_inode_maps(self.disk.sourceDir)
-		self.copyRecentFilesIntoCache(transfer_q)
+			print(f'File not found {metadb} defaulting to ' + '{}')
+			self.vfs.inode_path_map = {}
+
+
