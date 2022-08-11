@@ -12,8 +12,8 @@ import sys
 import os
 import logging
 from pyfuse3 import FUSEError
-from util import Col, formatByteSize
-from errors import NotEnoughSpaceError, SOFTLINK_DISABLED_ERROR
+from src.util import Col, formatByteSize
+from src.errors import NotEnoughSpaceError, SOFTLINK_DISABLED_ERROR
 from typing import Union, Final, get_args
 from sortedcontainers import SortedDict
 
@@ -85,11 +85,6 @@ class Cache(DiskBase):
 		self.path_timestamp: dict[str, int] = dict()
 		self._cached_inos: dict[int, bool] = dict()
 
-		# get OS dependant minimum directory size
-		os.mkdir('wolfs_tmp_directory')
-		self.MIN_DIR_SIZE = os.stat('wolfs_tmp_directory').st_size
-		os.rmdir('wolfs_tmp_directory')
-
 	# fullness of cache
 	def __le__(self, other: int) -> bool:
 		"""Is the cache large enough to hold `size` ?"""
@@ -109,9 +104,6 @@ class InodeTranslator(PathTranslator, DiskBase):
 	def __init__(self, sourceDir: Path, cacheDir: Path):
 		super().__init__(sourceDir, cacheDir)
 
-		# for mnt_ino_translation and path_to_ino mapping functions
-		#self.__mnt_ino2st_ino: dict[int, int] = {FUSE_ROOT_INODE: self.ROOT_INODE, self.ROOT_INODE: self.ROOT_INODE}
-		#self.__tmp_ino2st_ino: dict[int, int] = {FUSE_ROOT_INODE: self.ROOT_INODE, self.ROOT_INODE: self.ROOT_INODE}
 		self.__last_ino: int = 1  # as the first ino is always 2 (ino 1 is for bad blocks but fuse doesn't act that way)
 		self.__freed_inos: set[int] = set()
 		self.path_ino_map: dict[str, int] = dict()
@@ -171,9 +163,8 @@ class AbstractDisk(Cache):
 		assert False, 'cacheDir will never be set after instanciation!'
 
 	def __init__(self,  sourceDir: Path, cacheDir: Path, maxCacheSize: int, noatime: bool = True, cacheThreshold: float = 0.99):
-		self.trans = InodeTranslator(sourceDir, cacheDir)
-
 		super().__init__(maxCacheSize, noatime, cacheThreshold)
+		self.trans = InodeTranslator(sourceDir, cacheDir)
 
 	# getting inode and path info
 	def __getitem__(self, item: Union[int, Path_str]) -> int:
@@ -196,27 +187,6 @@ class Disk(AbstractDisk):
 	def __init__(self, sourceDir: Path, cacheDir: Path, maxCacheSize: int, noatime: bool = True,
 				 cacheThreshold: float = 0.99):
 		super().__init__(sourceDir, cacheDir, maxCacheSize, noatime, cacheThreshold)
-
-	# unused
-	# ===========
-	# private api
-	# ===========
-
-#	def _rebuildCacheDir(self) -> None:
-#		"""
-#		Rebuild the internal bookkeeping ( `self.__curent_CacheSize` , `self.in_cache` ) variables\n
-#		based on the contents currently in `self.cacheDir`
-#		"""
-#		self.in_cache.clear()
-#		self._current_CacheSize = 0
-#		getsize, islink, join = os.path.getsize, os.path.islink, os.path.join
-#		for dirpath, dirnames, filenames in os.walk(self.cacheDir, followlinks=False):
-#			for f in filenames:
-#				path = join(dirpath, f)
-#				# skip symbolic links for now
-#				if islink(path):
-#					continue
-#				self.cp2Cache(Path(path))
 
 	# ==========
 	# public api

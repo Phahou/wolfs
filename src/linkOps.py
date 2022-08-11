@@ -39,6 +39,7 @@ class AdditionalOps(XAttrsOps):
 	async def symlink(self, inode_p: int, name: str, target: str, ctx: RequestContext) -> EntryAttributes:
 		log.info()
 		raise FUSEError(errno.ENOSYS)
+
 		name = fsdecode(name)
 		target = fsdecode(target)
 		parent: Path = self.vfs.inode_to_cpath(inode_p)
@@ -48,6 +49,17 @@ class AdditionalOps(XAttrsOps):
 			os.chown(path, ctx.uid, ctx.gid, follow_symlinks=False)
 		except OSError as exc:
 			raise FUSEError(exc.errno)
-		stat = os.lstat(path)
-		self.vfs.add_path(stat.st_ino, path)
-		return await self.getattr(stat.st_ino)
+		#stat = os.lstat(path)
+		ino = self.disk.trans.path_to_ino(path)
+		lkup = self.vfs._lookup_cnt[ino]
+		self.vfs.add_path(ino, path)
+
+		result = await self.getattr(stat.st_ino)
+
+		# post conditions:
+		assert self.vfs.getInodeOf(name, inode_p) > 0, "Symbol link named *name* shall be in *inode_p*"
+		assert self.readlink(ino, None) == target,  "Symbol link shall point to *target*"
+		assert isinstance(result, EntryAttributes), "Return type shall be `EntryAttributes`"
+		assert lkup + 1 == self.vfs._lookup_cnt[ino], "On Sucess: Lookup Count shall increase by 1"
+
+		return result

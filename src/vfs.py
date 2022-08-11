@@ -90,9 +90,13 @@ class VFS(PathTranslator, CallStackAware):
 
 	# search for an inode via path
 	def getInodeOf(self, path: str, inode_p: int) -> int:
-		"""Get Inode referencing ´path´ which is in directory inode ´inode_p´"""
+		"""
+		Get Inode referencing ´path´ which is in directory inode ´inode_p´
+		:returns <=0 on failure
+		:returns  >0 on success
+		"""
 		i2p = self.inode_to_cpath
-		info: DirInfo = cast(DirInfo, self.inode_path_map[inode_p])
+		#info: DirInfo = cast(DirInfo, self.inode_path_map[inode_p])
 		children: list[int] = cast(DirInfo, self.inode_path_map[inode_p]).children
 
 		assert children, f'children is None {self.inode_path_map[inode_p].__str__()}'
