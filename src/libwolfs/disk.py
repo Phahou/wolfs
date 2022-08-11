@@ -104,7 +104,7 @@ class InodeTranslator(PathTranslator, DiskBase):
 	def __init__(self, sourceDir: Path, cacheDir: Path):
 		super().__init__(sourceDir, cacheDir)
 
-		self.__last_ino: int = 1  # as the first ino is always 2 (ino 1 is for bad blocks but fuse doesn't act that way)
+		self.__last_ino: int = DiskBase.ROOT_INODE  # as the first ino is always 1 (ino 1 is for bad blocks but fuse doesn't act that way)
 		self.__freed_inos: set[int] = set()
 		self.path_ino_map: dict[str, int] = dict()
 

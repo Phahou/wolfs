@@ -49,6 +49,23 @@ class PathOps(pyfuse3.Operations, CallStackAware):
 	# path methods
 	# ============
 
+	def add_Directory(self, inode_p: int, wolfs_inode: int, inode_p_path: str, child_inodes: list[int] = None) -> DirInfo:
+		# TODO: needs rework to also include inode_p
+		if child_inodes is None:
+			child_inodes = []
+
+		entry = FileInfo.getattr(path=inode_p_path)
+
+		# consitency checks
+		assert wolfs_inode != inode_p \
+			or wolfs_inode == DiskBase.ROOT_INODE  # exception so that '/' redirects to itself
+		assert wolfs_inode not in child_inodes
+		assert entry.st_ino == wolfs_inode
+		assert Path(inode_p_path).is_dir()
+		assert self.disk.trans.path_to_ino(inode_p_path) == inode_p
+
+		return self.vfs._add_Directory(inode_p, wolfs_inode, inode_p_path, entry, child_inodes)
+
 	def __fetchFile(self, f: Path, size: int) -> None:
 		"""
 		Discards one or multiple files to make space for `f`

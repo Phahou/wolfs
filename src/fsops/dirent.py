@@ -78,7 +78,7 @@ class DirentOps(XAttrsOps):
 		# 4. update book-keeping
 		attr = FileInfo.getattr(path=cpath)
 		attr.st_ino = self.disk.track(cpath)
-		self.vfs.add_Directory(inode_p, attr.st_ino, cpath, attr)
+		self.add_Directory(inode_p, attr.st_ino, cpath)
 		assert isinstance(self.vfs.inode_path_map[attr.st_ino], DirInfo), f"Logical error: {attr.st_ino} should be of type DirInfo"
 		self.journal.log_mkdir(inode_p, attr.st_ino, cpath, mode)
 
@@ -95,7 +95,7 @@ class DirentOps(XAttrsOps):
 
 		parent = self.vfs.inode_to_cpath(inode_p)
 		cpath = os.path.join(parent, fsdecode(name))
-		inode = self.path_to_ino(cpath)
+		inode = self.disk.trans.path_to_ino(cpath)
 		log.info(f"{Col(inode)}({Col(cpath)}) in {Col(inode_p)}({Col(parent)})")
 
 		# check if cpath is softlink into a flag (hardlinks to dirs dont exist)

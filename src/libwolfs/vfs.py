@@ -121,20 +121,14 @@ class VFS(PathTranslator, CallStackAware):
 		if inode not in info_p.children:
 			info_p.children.append(inode)
 
-	def add_Directory(self, inode_p: int, inode: int, path: str, entry: pyfuse3.EntryAttributes, child_inodes: list[int]) -> DirInfo:
-		# TODO: needs rework to also include inode_p
-		assert inode != inode_p
-		assert inode not in child_inodes
-		assert entry.st_ino == inode
-		assert Path(path).is_dir()
-
-		self._lookup_cnt[inode] += 1
-		src_p, cache_p = self.toSrc(path), self.toTmp(path)
+	def _add_Directory(self, inode_p: int, wolfs_inode: int, inode_p_path: str, entry: pyfuse3.EntryAttributes, child_inodes: list[int]) -> DirInfo:
+		self._lookup_cnt[wolfs_inode] += 1
+		src_p, cache_p = self.toSrc(inode_p_path), self.toTmp(inode_p_path)
 
 		directory = DirInfo(src_p, cache_p, entry, child_inodes=child_inodes)
-		self.inode_path_map[inode] = directory
+		self.inode_path_map[wolfs_inode] = directory
 		if dir_info := cast(DirInfo, self.inode_path_map.get(inode_p)):
-			dir_info.children.append(inode)
+			dir_info.children.append(wolfs_inode)
 
 		return directory
 
