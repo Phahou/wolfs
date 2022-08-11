@@ -28,9 +28,8 @@ log = logging.getLogger(__name__)
 # VFSOps
 # ======================================================================================================================
 
-class PathOps(pyfuse3.Operations, CallStackAware):
+class VFSOps(pyfuse3.Operations, CallStackAware):
 	_DEFAULT_CACHE_SIZE: Final[int] = 512
-	__LOOKUP_NOENT_TIMEOUT_IN_SECS: Final[int] = 5
 	_STDOUT: Final[str] = "/dev/stdout"
 
 	def __getitem__(self, inode: int) -> int:
@@ -162,7 +161,8 @@ class PathOps(pyfuse3.Operations, CallStackAware):
 			self.vfs._lookup_cnt[ino_old] += 1
 
 
-class BasicOps(PathOps):
+class BasicOps(VFSOps):
+	__LOOKUP_NOENT_TIMEOUT_IN_SECS: Final[int] = 5
 
 	def update_refs(self, fd: int, inode: int):
 		"""in open & create functions"""
@@ -446,6 +446,3 @@ class NodeOps(BasicOps):
 		self.vfs.add_path(attr.st_ino, path)
 		return attr
 
-
-class VFSOps(PathOps):
-	pass

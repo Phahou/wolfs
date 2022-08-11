@@ -1,6 +1,6 @@
 # directory methods
 # =================
-from src.fsops.xattrs import XAttrsOps
+from src.fsops.linkOps import LinkOps
 from src.fsops.vfsops import log
 import os
 import os.path
@@ -13,7 +13,7 @@ from src.libwolfs.fileInfo import FileInfo, DirInfo
 from typing import Final, Union, cast
 from src.remote import RemoteNode  # type: ignore
 
-class DirentOps(XAttrsOps):
+class DirentOps(LinkOps):
 
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)

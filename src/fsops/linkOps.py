@@ -3,12 +3,12 @@ from pyfuse3 import FUSEError, RequestContext, EntryAttributes
 from os import fsencode, fsdecode
 import os
 from pathlib import Path
-from xattrs import XAttrsOps
+from src.fsops.xattrs import XAttrsOps
 import logging
 log = logging.getLogger(__name__)
 # pretty much only dead code for now but it will be used later on when the file system is a bit more
 # stable and needs  for example the extended xattrs funcs
-class AdditionalOps(XAttrsOps):
+class LinkOps(XAttrsOps):
 	# link methods (do not use)
 	# =========================
 

@@ -1,11 +1,11 @@
 #!/usr/bin/env python
-from src.fsops.vfsops import VFSOps
+from src.fsops.vfsops import NodeOps
 import errno
 from pyfuse3 import FUSEError, RequestContext
 import logging
 log = logging.getLogger(__name__)
 
-class XAttrsOps(VFSOps):
+class XAttrsOps(NodeOps):
 	async def access(self, inode: int, mode: int, ctx: RequestContext) -> None:
 		# for permissions but eh
 		log.info('access')
