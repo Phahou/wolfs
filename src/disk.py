@@ -12,8 +12,8 @@ import sys
 import os
 import logging
 from pyfuse3 import FUSEError
-from src.util import Col, formatByteSize
-from src.errors import NotEnoughSpaceError, SOFTLINK_DISABLED_ERROR
+from util import Col, formatByteSize
+from errors import NotEnoughSpaceError, SOFTLINK_DISABLED_ERROR
 from typing import Union, Final, get_args
 from sortedcontainers import SortedDict
 
@@ -116,6 +116,9 @@ class InodeTranslator(PathTranslator, DiskBase):
 		self.__freed_inos: set[int] = set()
 		self.path_ino_map: dict[str, int] = dict()
 
+		# init root path by defining root ino as last used ino
+		self.path_ino_map["/"] = self.__last_ino
+
 	def __delitem__(self, inode__path: tuple[int, str]) -> None:
 		"""delete translation inode"""
 		inode, path = inode__path
@@ -145,15 +148,6 @@ class InodeTranslator(PathTranslator, DiskBase):
 			self.__last_ino += 1
 		self.path_ino_map[path] = ino
 
-		#if os.path.exists(some_path):  # update foreign translation only if accessible
-		#	foreign_ino: int = os.stat(some_path).st_ino
-		#	if some_path.__str__().startswith(self.sourceDir.__str__()):
-		#		self.__mnt_ino2st_ino[foreign_ino] = ino
-		#	elif some_path.__str__().startswith(self.cacheDir.__str__()):
-		#		self.__tmp_ino2st_ino[foreign_ino] = ino
-		#	else:
-		#		raise ValueError(
-		#			f"Wrong input! {some_path} has to have a prefix of {self.sourceDir} or {self.cacheDir}")
 		return ino
 
 class AbstractDisk(Cache):
@@ -184,12 +178,12 @@ class AbstractDisk(Cache):
 	# getting inode and path info
 	def __getitem__(self, item: Union[int, Path_str]) -> int:
 		""""""
-#		if isinstance(item, int):
-#			ino = item if item != FUSE_ROOT_INODE else self.ROOT_INODE
+		if isinstance(item, int):
+			print("????")
 		if isinstance(item, get_args(Path_str)):
 			if isinstance(item, Path_str):
 				ino = self.trans.path_to_ino(item)
-			else:
+			else: # int
 				path, reused_ino = item
 				ino = self.trans.path_to_ino(path, reused_ino)
 		else:
@@ -344,36 +338,39 @@ class Disk(AbstractDisk):
 	def untrack(self, path: str) -> None:
 		"""Doesn't track `path` anymore and frees up its reserved size. Can be seen as a 'delete'"""
 		src_path: str = self.trans.toSrc(path).__str__()
-		if timestamp := self.path_timestamp.get(src_path):
-			try:
-				i: int = 0
+		timestamp = self.path_timestamp.get(src_path, default=None)
+		if timestamp is None:
+			return
 
-				# assign references for a bit of a speedup / readablity
-				in_cache = self.in_cache
+		i: int = 0
 
-				# getting the correct item by type
-				og_item: Union[tuple[str, int], list[tuple[str, int]]] = in_cache[timestamp]
-				if isinstance(og_item, list):
-					i = [y[0] for y in og_item].index(src_path)
-					item = og_item[i]
-				else:
-					item = og_item
-				(t_path, size) = item[0], item[1]
+		# assign references for a bit of a speedup / readablity
+		in_cache = self.in_cache
 
-				# actual clean up
-				if isinstance(og_item, list):
-					del og_item[i]
-					if len(in_cache) == 0:
-						del in_cache[timestamp]
-				else:
+		try:
+			# getting the correct item by type
+			og_item: Union[tuple[str, int], list[tuple[str, int]]] = in_cache[timestamp]
+			if isinstance(og_item, list):
+				i = [y[0] for y in og_item].index(src_path)
+				item = og_item[i]
+			else:
+				item = og_item
+			(t_path, size) = item[0], item[1]
+
+			# actual clean up
+			if isinstance(og_item, list):
+				del og_item[i]
+				if len(in_cache) == 0:
 					del in_cache[timestamp]
+			else:
+				del in_cache[timestamp]
 
-				del self.path_timestamp[src_path]
-				del self._cached_inos[self.trans.path_to_ino(src_path)]
-				self._current_CacheSize -= size
-			except KeyError as e:
-				log.error("KeyError Exception that shouldnt have happened happened")
-				log.exception(e)
+			del self.path_timestamp[src_path]
+			del self._cached_inos[self.trans.path_to_ino(src_path)]
+			self._current_CacheSize -= size
+		except KeyError as e:
+			log.error("KeyError Exception that shouldnt have happened happened")
+			log.exception(e)
 
 	# todo: think about making a write cache for newly created files -> store write_ops
 	#       check after a timeout if said files still exist or are still referenced if not
