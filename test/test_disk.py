@@ -1,22 +1,16 @@
 #!/usr/bin/env python
 # type: ignore
 
+import errno
 import os
-import random
-import tempfile
 import time
 from pathlib import Path
 
 import pytest
-import sys
-import filecmp
-import shutil
-import errno
 from IPython import embed
 
 embed = embed
 import random
-from test.test_config import REMOTE, MNT_DIR, DATA_DIR
 from src.disk import Disk
 
 TEST_FILE = __file__
@@ -24,8 +18,6 @@ TEST_FILE = __file__
 with open(TEST_FILE, 'rb') as fh:
 	TEST_DATA = fh.read()
 
-assert os.path.exists(REMOTE), 'Only use these tests if the remote file system is mounted!'
-assert os.path.exists(MNT_DIR), 'Only use these tests if Wolfs is initialised'
 
 ###################################################
 # Helpers

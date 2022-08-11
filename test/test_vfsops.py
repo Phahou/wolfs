@@ -1,18 +1,16 @@
 #!/usr/bin/env python
 # type: ignore
 
+import errno
+import filecmp
 import os
-import random
+import shutil
 
 import pytest
-import sys
-import filecmp
-import shutil
-import errno
 from IPython import embed
+
 embed = embed
 import random
-import time
 from test.test_config import REMOTE, MNT_DIR, DATA_DIR
 
 
