@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 
-if mount | grep mnt/mountpoint > /dev/null; then
-    umount mnt/mountpoint
+if mount | grep mnt/wolfs > /dev/null; then
+    umount /mnt/wolfs
 fi
 
 #rm -rf mnt/local_data

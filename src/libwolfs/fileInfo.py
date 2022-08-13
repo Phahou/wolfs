@@ -1,9 +1,14 @@
+#!/usr/bin/env python
+# job of this module:
+#  - data container for files, directories and symbolic links
+#  - acurately mirror permissions and metadata of backend
+
 import os
 from pathlib import Path
 
 import pyfuse3
 from pyfuse3 import FUSEError, EntryAttributes
-from typing import Union, Optional, Any
+from typing import Union, Any
 import stat as stat_m
 
 class FileInfo:
@@ -69,7 +74,7 @@ class FileInfo:
 				truncate(path_or_fh, attr.st_size)
 
 			if fields.update_mode:
-				# Under Linux, chmod always resolves symlinks so we should
+				# Under Linux, chmod always resolves symlinks, so we should
 				# actually never get a setattr() request for a symbolic
 				# link.
 				assert not stat_m.S_ISLNK(attr.st_mode)

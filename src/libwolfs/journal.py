@@ -1,4 +1,11 @@
-#!/usr/bin/python
+#!/usr/bin/env python
+# job of this module:
+#  - keep a record of files/directories were modified while in cache,
+#    so they can be synced later accordingly without introducing inconsistency
+#  - sync files
+#  usage notes:
+#  - shall only be called be other parts of the code (hollywood principle)
+#    namely: disk, vfs
 
 # external imports
 import sys

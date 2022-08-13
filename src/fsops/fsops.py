@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# The job of this module:
+#  - save & load previously mounted filesystem, so we can mount w/o reindexing
+#  - initizalition of filesystem (generating directory and file data structures
+#  - fill the cache with most recently used files
 
 # suppress 'unused' warnings
 import pyfuse3
@@ -57,7 +61,7 @@ class Wolfs(DirentOps):
 		# else:
 		# remote is offline our best guess is to believe that the cache is up to date
 		# todo: set to poll is remote is mounted and replace metafile if so
-		self.load_internal_state(self.__metadb)
+		# self.load_internal_state(self.__metadb)
 		# try:
 		#	#self.vfs.inode_path_map = load_obj(metadb)
 		# except FileNotFoundError or EOFError:

@@ -1,4 +1,10 @@
 #!/usr/bin/env python
+# The job of this module:
+#  - translate Paths from backend, cache and the cache filesystem
+#  - give an easy interface to how much disk space is used
+#    -> needed to efficiently use and allocate space
+#  - track files that are currently in cache
+#    -> makes it easier to serve files that are already in the cache
 
 # suppress 'unused' warnings
 

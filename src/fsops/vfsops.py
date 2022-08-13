@@ -1,4 +1,8 @@
 #!/usr/bin/python
+# job of this module:
+# - interface to add/delete paths to internal data structures
+# - get a file from the backend
+# - basic operations for the filesystem
 
 from src.libwolfs.errors import SOFTLINK_DISABLED_ERROR
 import os

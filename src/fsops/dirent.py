@@ -75,7 +75,7 @@ class DirentOps(LinkOps):
 		except OSError as exc:
 			raise FUSEError(exc.errno)
 
-		# 4. update book-keeping
+		# 4. update bookkeeping
 		attr = FileInfo.getattr(path=cpath)
 		attr.st_ino = self.disk.track(cpath)
 		self.add_Directory(inode_p, attr.st_ino, cpath)

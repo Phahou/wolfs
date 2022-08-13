@@ -1,4 +1,6 @@
 #!/usr/bin/python
+# job of this module:
+#  - add/delete paths (directories/files) to internal data structures
 
 # suppress 'unused' warnings
 from IPython import embed
