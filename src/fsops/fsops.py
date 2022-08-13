@@ -91,47 +91,54 @@ class Wolfs(DirentOps):
 			last_used = getattr(dir_attrs, self.disk.time_attr) // self.disk.__NANOSEC_PER_SEC__
 			transfer_q.push_nowait((last_used, (ino, dir_attrs.st_size)))
 
-		i = 0
+		i: int = 0
 		islink = os.path.islink
-		root_ino = self.disk.trans.path_to_ino(root)
+
+		def add_subdirectories(dirpath: str, dirnames: [str], filenames: [str]) -> (int, [str]):
+			dir_attrs = FileInfo.getattr(path=dirpath)
+			dir_inode = self.disk.trans.path_to_ino(dirpath)
+			dir_attrs.st_ino = dir_inode
+
+			# calculate inode_p by deriving the parent path
+			# root_path: str = self.disk.trans.toRoot(dirpath)
+			# inode_p_path: str = '/'
+			# if j := root_path.rfind('/'):  # != 0
+			# 	inode_p_path = root_path[:j]
+			# inode_p: int = self.disk.trans.path_to_ino(inode_p_path)
+
+			# filter out softlinks and prepare to absolute paths
+			abs_dirnames = list(filter(lambda x: not islink(x), map(lambda p: os.path.join(dirpath, p), dirnames)))
+			abs_filenames = list(filter(lambda x: not islink(x), map(lambda p: os.path.join(dirpath, p), filenames)))
+			subdir_inos = list(map(lambda p: self.disk.trans.path_to_ino(p), abs_dirnames))
+
+			# TODO:
+			#   uhhh ich denk wir haben immernoch das problem das die einträge doppelt sind bei Ordnern bei Dateien ist es nicht so
+			#   gut is das wir n indirekten zugang zu der add_Directory haben könnte man eigentlich auch für Filepath und add_path verwenden
+			#   um die eigentliche funktion kurz zu halten aber die konstistenz checks vollständig zu haben
+			self.add_Directory(dirpath)
+			self.add_subDirectories(subdir_inos, inode_p=dir_inode)
+			push_to_queue(dir_inode, dir_attrs)
+
+			return dir_inode, abs_filenames
 
 		# reminder that drives actually have very small inode numbers (e.g. 2 or 5)
 		for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
 			if islink(dirpath):
 				continue
-			dir_attrs = FileInfo.getattr(path=dirpath)
-			dir_inode = self.disk.trans.path_to_ino(dirpath)
-			dir_attrs.st_ino = dir_inode
-			# print(inode_p, end=', ')
-			i = dirpath.rfind('/')
+			dir_inode, filenames = add_subdirectories(dirpath, dirnames, filenames)
 
-			inode_p: int = root_ino
-			if i > 0:
-				inode_p: int = self.disk.trans.path_to_ino(dirpath[:i])
-			directory: DirInfo = self.vfs.add_Directory(inode_p, dir_inode, dirpath, dir_attrs, [])
-
-			push_to_queue(dir_inode, dir_attrs)
-
-			for d in dirnames:
-				# only add child inodes here the subdirs will be walked through
-				subdir_path = os.path.join(dirpath, d)
-				if islink(subdir_path):
-					continue
-				directory.children.append(self.disk.trans.path_to_ino(subdir_path))
-
-			# filepaths, fileattrs = [], []
 			for f in filenames:
-				filepath = os.path.join(dirpath, f)
-				if islink(filepath):
-					continue
-				file_attrs = FileInfo.getattr(path=filepath)
-				st_ino = self.disk.trans.path_to_ino(filepath)
+				file_attrs = FileInfo.getattr(path=f)
+				st_ino = self.disk.trans.path_to_ino(f)
 				file_attrs.st_ino = st_ino
 				push_to_queue(st_ino, file_attrs)
-				assert self.disk.trans.path_to_ino(filepath) == self.disk.trans.path_to_ino(filepath), 'path != same path'
-				self.vfs.addFilePath(dir_inode, st_ino, filepath, file_attrs)
-				i = print_progress(i, 'add_path', st_ino, filepath)
+
+				self.vfs.addFilePath(dir_inode, st_ino, f, file_attrs)
+				i = print_progress(i, 'add_path', st_ino, f)
 			i = print_progress(i, 'add_Directory', dir_inode, dirpath)
+
+		# remove doubly added root inode, do it here as the internal add function would need another if then
+		self.vfs.inode_path_map[self.disk.ROOT_INODE].children.remove(self.disk.ROOT_INODE)
 
 		for k, v in self.vfs.inode_path_map.items():
 			assert k == v.entry.st_ino
@@ -177,5 +184,3 @@ class Wolfs(DirentOps):
 		except FileNotFoundError or EOFError:
 			print(f'File not found {metadb} defaulting to ' + '{}')
 			self.vfs.inode_path_map = {}
-
-

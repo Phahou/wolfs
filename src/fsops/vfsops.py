@@ -474,4 +474,3 @@ class NodeOps(BasicOps):
 		attr.st_ino = self.disk[path]
 		self.vfs.add_path(attr.st_ino, path)
 		return attr
-
