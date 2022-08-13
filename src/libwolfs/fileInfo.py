@@ -112,10 +112,20 @@ class FileInfo:
 			raise FUSEError(exc.errno)
 
 
+class listset(list):
+	# for checking of something got added twice which is absolutely wrong
+	def append(self, item: Any) -> None:
+		assert item not in self
+		super(listset, self).append(item)
+
+	def __add__(self, other):
+		assert other not in self
+		super(listset, self).__add__(other)
+
 class DirInfo(FileInfo):
 	def __init__(self, src: Path, cache: Path, fileAttrs: EntryAttributes, child_inodes: list[int]) -> None:
 		super().__init__(src, cache, fileAttrs)
-		self.children: list[int] = child_inodes
+		self.children: listset[int] = listset(child_inodes)
 
 	def __str__(self) -> str:
 		return f'src:{self.src} | cache:{self.cache} | childs:{self.children}'

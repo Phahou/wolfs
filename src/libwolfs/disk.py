@@ -32,7 +32,8 @@ class PathTranslator:
 
 	def __init__(self, sourceDir: Path, cacheDir: Path):
 		def setattr_exit_on_failure(name: str, value: Path) -> None:
-			path = Path(value)
+			# fixed issue that CachePath fails on getting the parent manually
+			path = Path(os.path.abspath(value))
 			if not path.exists():
 				log.critical(f'[Errno {errno.ENOENT}] {os.strerror(errno.ENOENT)}: {path}')
 				sys.exit(errno.ENOENT)
@@ -50,6 +51,14 @@ class PathTranslator:
 
 	def toTmp(self, path: Path_str) -> Path:
 		return CachePath.toDestPath(self.sourceDir, self.cacheDir, path)
+
+	def getParent(self, path: Path_str) -> str:
+		result: str = self.toRoot(path)
+		if result.count('/') < 2:
+			result = '/'
+		else:
+			result = result[:result.rfind('/')]
+		return result
 
 
 class CachePath(Path):
@@ -147,6 +156,9 @@ class InodeTranslator(PathTranslator, DiskBase):
 		self.path_ino_map[path] = ino
 
 		return ino
+
+	def ino_to_path(self, some_ino: int) -> Path:
+		pass
 
 class AbstractDisk(Cache):
 	trans: InodeTranslator

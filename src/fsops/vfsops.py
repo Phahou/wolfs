@@ -51,23 +51,48 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 
 	# path methods
 	# ============
+	def add_subDirectories(self, child_inodes: list[int],
+		inode_p: int = 0, wolfs_inode_path: str = "") -> DirInfo:
+		trans = self.disk.trans
+		assert inode_p >= 0\
+			or (wolfs_inode_path != "" and trans.toRoot(wolfs_inode_path) in trans.path_ino_map)
 
-	def add_Directory(self, inode_p: int, wolfs_inode: int, inode_p_path: str, child_inodes: list[int] = None) -> DirInfo:
-		# TODO: needs rework to also include inode_p
-		if child_inodes is None:
-			child_inodes = []
+		if inode_p > 0:
+			# TODO: path_to_ino -> inode_to_cpath should be in the same class as they are interchangeable
+			assert_path: str = self.disk.trans.toRoot(self.vfs.inode_to_cpath(inode_p))
+			assert inode_p == trans.path_to_ino(assert_path)
+		else:
+			inode_p = trans.path_to_ino(wolfs_inode_path)
+			assert inode_p == self.vfs.inode_to_cpath(inode_p)
 
-		entry = FileInfo.getattr(path=inode_p_path)
+		assert inode_p not in child_inodes
+		assert inode_p in self.vfs.inode_path_map
+
+		# both should be consitent from here on
+		directory: DirInfo = self.vfs.inode_path_map[inode_p]
+		assert child_inodes not in directory.children
+		directory.children += child_inodes
+		return directory
+
+	def add_Directory(self, wolfs_inode_path: str) -> DirInfo:
+		wolfs_inode: int = self.disk.trans.path_to_ino(wolfs_inode_path)
+
+		# get inode info about parent
+
+		inode_p_path = self.disk.trans.getParent(wolfs_inode_path)
+		inode_p = self.disk.trans.path_to_ino(inode_p_path)
+
+		entry = FileInfo.getattr(path=wolfs_inode_path)
+		entry.st_ino = wolfs_inode
 
 		# consitency checks
 		assert wolfs_inode != inode_p \
 			or wolfs_inode == DiskBase.ROOT_INODE  # exception so that '/' redirects to itself
-		assert wolfs_inode not in child_inodes
 		assert entry.st_ino == wolfs_inode
-		assert Path(inode_p_path).is_dir()
+		assert Path(wolfs_inode_path).is_dir()
 		assert self.disk.trans.path_to_ino(inode_p_path) == inode_p
 
-		return self.vfs._add_Directory(inode_p, wolfs_inode, inode_p_path, entry, child_inodes)
+		return self.vfs._add_Directory(inode_p, wolfs_inode, wolfs_inode_path, entry)
 
 	def __fetchFile(self, f: Path, size: int) -> None:
 		"""
@@ -286,7 +311,7 @@ class BasicOps(VFSOps):
 
 		return pyfuse3.FileInfo(fh=fd)
 
-	async def create(self, inode_p: int, name: str,mode: int, flags: int,
+	async def create(self, inode_p: int, name: str, mode: int, flags: int,
 					 ctx: pyfuse3.RequestContext) -> (pyfuse3.FileInfo, pyfuse3.EntryAttributes):
 		inode_p = self[inode_p]
 		cpath: str = os.path.join(self.vfs.inode_to_cpath(inode_p), fsdecode(name))

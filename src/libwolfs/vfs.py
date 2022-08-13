@@ -123,14 +123,26 @@ class VFS(PathTranslator, CallStackAware):
 		if inode not in info_p.children:
 			info_p.children.append(inode)
 
-	def _add_Directory(self, inode_p: int, wolfs_inode: int, inode_p_path: str, entry: pyfuse3.EntryAttributes, child_inodes: list[int]) -> DirInfo:
-		self._lookup_cnt[wolfs_inode] += 1
-		src_p, cache_p = self.toSrc(inode_p_path), self.toTmp(inode_p_path)
+	def _add_Directory(self, inode_p: int, wolfs_inode: int, inode_path: str, entry: pyfuse3.EntryAttributes) -> DirInfo:
+		src_p, cache_p = self.toSrc(inode_path), self.toTmp(inode_path)
+		directory = DirInfo(src_p, cache_p, entry, [])
 
-		directory = DirInfo(src_p, cache_p, entry, child_inodes=child_inodes)
+		# "create" directory in inode table
 		self.inode_path_map[wolfs_inode] = directory
-		if dir_info := cast(DirInfo, self.inode_path_map.get(inode_p)):
-			dir_info.children.append(wolfs_inode)
+		self._lookup_cnt[wolfs_inode] += 1
+
+		# update parent accordingly
+		if parent := cast(DirInfo, self.inode_path_map.get(inode_p)):
+			if wolfs_inode in parent.children:
+				pass # optimize to return early
+			else:
+				parent.children.append(wolfs_inode)
+
+		# post-condition:
+		assert directory == self.inode_path_map[wolfs_inode]
+		assert wolfs_inode in parent.children
+		# TODO: merge vfs and disk translators into disk or make a new one called FSTranslator
+		# assert inode_path != self.disk.trans.getParent()
 
 		return directory
 

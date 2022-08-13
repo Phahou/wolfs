@@ -251,7 +251,8 @@ class Journal:
 		# TODO: sync up later (timer would probably be the best choice or
 		#  		some kind of check if there is almost no space available on underlying cache disk)
 		# special case if we enable renaming things:
-		# log.warning(f'Not implemented')
+		log.warning(f'Not implemented')
+		return
 
 		# oh, actually we can just diff for the size lol
 		curr_size = cast(FileInfo, self.vfs.get_FileInfo(inode)).entry.st_size
