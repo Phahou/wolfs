@@ -11,11 +11,6 @@ import pytest
 import time
 import os
 
-def runTest(test):
-    time.sleep(1.0)
-    test()
-    print('------------------------------------------------------------------')
-
 # ------------------------------------------------------------------
 #@pytest.fixture
 # result of sample() gets copied to tests with same formal parameter

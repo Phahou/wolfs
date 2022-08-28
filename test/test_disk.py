@@ -12,10 +12,9 @@ from IPython import embed
 embed = embed
 import random
 from src.libwolfs.disk import Disk
+from test.util import name_generator, nano_sleep, pseudo_file
 
-TEST_FILE = __file__
-
-with open(TEST_FILE, 'rb') as fh:
+with open(__file__, 'rb') as fh:
 	TEST_DATA = fh.read()
 
 
@@ -27,15 +26,6 @@ CACHE_SIZE = 4 * 1024
 USE_NOATIME = True
 CACHE_THRESHOLD = 0.7
 
-
-def name_generator():
-	return 'testfile_%d' % (random.random() * 10000)
-
-
-def nano_sleep():
-	time.sleep(random.randrange(1000) / 100_000)
-
-
 def prep_Disk(sourceDir, cacheDir, maxCacheSize=CACHE_SIZE, noatime=USE_NOATIME,
 			  cacheThreshold=CACHE_THRESHOLD):
 	return Disk(sourceDir=sourceDir, cacheDir=cacheDir, maxCacheSize=maxCacheSize, noatime=noatime,
@@ -44,21 +34,6 @@ def prep_Disk(sourceDir, cacheDir, maxCacheSize=CACHE_SIZE, noatime=USE_NOATIME,
 
 def clean_Disk():
 	pass
-
-
-def pseudo_file(test_file, wanted_filesize):
-	# create pseudo files of a particular file size:
-	# url: https://stackoverflow.com/questions/8816059/create-file-of-particular-size-in-python
-	with open(test_file, "wb") as f:
-		f.seek((wanted_filesize * 1024) - 1)
-		f.write(b"\0")
-	assert os.stat(test_file).st_size == 1024 * wanted_filesize
-
-
-def make_test_file(path):
-	with open(path, "w") as f:
-		f.write(str(TEST_DATA, 'utf8'))
-
 
 def get_src_cache_directory_pair(tmpdir_factory):
 	tmpdir_source = tmpdir_factory.mktemp("src")
@@ -179,9 +154,9 @@ class TestDisk:
 
 		dst: Path = Path(os.path.join(src_dir, name_generator()))
 
-		make_test_file(src)
+		pseudo_file(src)
 		nano_sleep()
-		make_test_file(dst)
+		pseudo_file(dst)
 
 		Disk.copystat(src, dst)
 		stat_src = os.stat(src)
