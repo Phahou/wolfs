@@ -231,6 +231,7 @@ class TestDisk:
 		# later when symbolic links are added
 		pass
 
+	@pytest.mark.skip
 	def test_path2Ino(self, tmpdir_factory):
 		tmpdir_source, tmpdir_cache = get_src_cache_directory_pair(tmpdir_factory)
 		disk = prep_Disk(tmpdir_source, tmpdir_cache, maxCacheSize=1)

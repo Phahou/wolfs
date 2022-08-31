@@ -50,6 +50,7 @@ def prep_mkdir():
 # it can be triggered by opening an opened file directly after calling unlink
 #   Fortunately it won't be a problem unless we directly reuse the inode number which we currently dont
 #   (inodes numbers are just growing and freed inodes aren't reused )
+@pytest.mark.skip
 class TestVFSOps:
 	def test_unsynced_write(self) -> None:
 		"""
