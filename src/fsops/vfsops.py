@@ -12,7 +12,8 @@ from pyfuse3 import ROOT_INODE as FUSE_ROOT_INODE
 import errno
 from pyfuse3 import FUSEError
 from os import fsdecode
-from src.libwolfs.disk import Disk, DiskBase
+from src.libwolfs.disk import Disk
+from src.libwolfs.translator import DiskBase
 from src.libwolfs.util import Col
 from src.libwolfs.vfs import VFS
 from src.libwolfs.fileInfo import FileInfo, DirInfo

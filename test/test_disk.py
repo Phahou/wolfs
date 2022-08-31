@@ -239,20 +239,20 @@ class TestDisk:
 
 		# 1. case: path is unkown -> new ino
 		ino = disk[path]
-		assert disk.trans.path_ino_map.get(rpath) == ino, f"path didnt save ino in internal dict"
+		assert disk._InodeTranslator__path_ino_map.get(rpath) == ino, f"path didnt save ino in internal dict"
 
 		# 2. case: path is known -> same ino (normal ops)
 		assert disk[path] == ino, f"If known the same ino should be returned"
 
 		# 3. case: reusing an ino (in rename ops)
 		del disk.trans[(ino, path.__str__())]
-		ino_rpath = disk.trans.path_ino_map.get(rpath)
-		assert ino_rpath is None, f"{disk.trans.path_ino_map} should contain {path} as it was inserted"
+		ino_rpath = disk._InodeTranslator__path_ino_map.get(rpath)
+		assert ino_rpath is None, f"{disk._InodeTranslator__path_ino_map} should contain {path} as it was inserted"
 		__freed_inos = getattr(disk.trans, '_' + disk.trans.__class__.__name__ + '__freed_inos')
 		assert ino in __freed_inos, f"{__freed_inos} should contain {ino} as it was deleted"
 
 		disk.trans.path_to_ino(path, reuse_ino=ino)
-		assert disk.trans.path_ino_map.get(rpath) == ino, f"Should have reused the same ino"
+		assert disk._InodeTranslator__path_ino_map.get(rpath) == ino, f"Should have reused the same ino"
 
 		# 4. case: inodes grow only larger
 		path2: Path = Path(os.path.join(tmpdir_source, name_generator()))

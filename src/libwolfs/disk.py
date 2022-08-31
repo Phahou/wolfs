@@ -14,151 +14,17 @@ embed = embed
 from pathlib import Path
 import shutil
 import errno
-import sys
 import os
 import logging
 from pyfuse3 import FUSEError
 from src.libwolfs.util import Col, formatByteSize
 from src.libwolfs.errors import NotEnoughSpaceError, SOFTLINK_DISABLED_ERROR
 from typing import Union, Final, get_args
-from sortedcontainers import SortedDict
+from src.libwolfs.translator import InodeTranslator
+from src.libwolfs.cache import Cache
 
 log = logging.getLogger(__name__)
 Path_str = Union[str, Path]
-
-class PathTranslator:
-	sourceDir: Path
-	cacheDir: Path
-
-	def __init__(self, sourceDir: Path, cacheDir: Path):
-		def setattr_exit_on_failure(name: str, value: Path) -> None:
-			# fixed issue that CachePath fails on getting the parent manually
-			path = Path(os.path.abspath(value))
-			if not path.exists():
-				log.critical(f'[Errno {errno.ENOENT}] {os.strerror(errno.ENOENT)}: {path}')
-				sys.exit(errno.ENOENT)
-			else:
-				setattr(self, name, path)
-
-		setattr_exit_on_failure('sourceDir', sourceDir)
-		setattr_exit_on_failure('cacheDir', cacheDir)
-
-	def toRoot(self, path: Path_str) -> str:
-		return CachePath.toRootPath(self.sourceDir, self.cacheDir, path)
-
-	def toSrc(self, path: Path_str) -> Path:
-		return CachePath.toDestPath(self.cacheDir, self.sourceDir, path)
-
-	def toTmp(self, path: Path_str) -> Path:
-		return CachePath.toDestPath(self.sourceDir, self.cacheDir, path)
-
-	def getParent(self, path: Path_str) -> str:
-		result: str = self.toRoot(path)
-		if result.count('/') < 2:
-			result = '/'
-		else:
-			result = result[:result.rfind('/')]
-		return result
-
-
-class CachePath(Path):
-	@staticmethod
-	def toRootPath(sourceDir: Path, cacheDir: Path, path: Path_str) -> str:
-		"""Get the Path without the cache or src prefix"""
-		_path: str = path if isinstance(path, str) else path.__str__()
-		root = _path.replace(sourceDir.__str__(), '').replace(cacheDir.__str__(), '')
-		return ('/' + root).replace('//', '/') if root else '/'
-
-	@staticmethod
-	def toDestPath(sourceDir: Path, destDir: Path, path: Path_str) -> Path:
-		root = CachePath.toRootPath(sourceDir, destDir, path)
-		result = f"{destDir.__str__()}{root}".replace('//', '/')
-		return Path(result)
-
-class DiskBase:
-	ROOT_INODE: Final[int] = 2
-	__MEGABYTE__: Final[int] = 1024 * 1024
-	__NANOSEC_PER_SEC__: Final[int] = 1_000_000_000
-
-class Cache(DiskBase):
-	maxCacheSize: Final[int]
-	MIN_DIR_SIZE: Final[int]
-
-	def __init__(self, maxCacheSize: int, noatime: bool = True, cacheThreshold: float = 0.99):
-		# get OS dependant minimum directory size
-		os.mkdir('wolfs_tmp_directory')
-		self.MIN_DIR_SIZE = os.stat('wolfs_tmp_directory').st_size
-		os.rmdir('wolfs_tmp_directory')
-
-		self._current_CacheSize: int = 0
-		self._cacheThreshold: float = cacheThreshold
-		self.maxCacheSize = maxCacheSize * self.__MEGABYTE__
-
-		self.time_attr: str = 'st_mtime_ns' if noatime else 'st_atime_ns'  # remote has mountopt noatime set?
-
-		self.in_cache: SortedDict[int, (str, int)] = SortedDict()
-		self.path_timestamp: dict[str, int] = dict()
-		self._cached_inos: dict[int, bool] = dict()
-
-	# fullness of cache
-	def __le__(self, other: int) -> bool:
-		"""Is the cache large enough to hold `size` ?"""
-		return other <= self.maxCacheSize
-
-	def __lt__(self, other: int) -> bool:
-		return other < self.maxCacheSize
-
-	def __gt__(self, other: int) -> bool:
-		return other > self.maxCacheSize
-
-	def __ge__(self, other: int) -> bool:
-		return other >= self.maxCacheSize
-
-
-class InodeTranslator(PathTranslator, DiskBase):
-	def __init__(self, sourceDir: Path, cacheDir: Path):
-		super().__init__(sourceDir, cacheDir)
-
-		self.__last_ino: int = DiskBase.ROOT_INODE  # as the first ino is always 1 (ino 1 is for bad blocks but fuse doesn't act that way)
-		self.__freed_inos: set[int] = set()
-		self.path_ino_map: dict[str, int] = dict()
-
-		# init root path by defining root ino as last used ino
-		self.path_ino_map["/"] = self.__last_ino
-
-	def __delitem__(self, inode__path: tuple[int, str]) -> None:
-		"""delete translation inode"""
-		inode, path = inode__path
-		self.__freed_inos.add(inode)
-		rpath = self.toRoot(path)
-		del self.path_ino_map[rpath]
-
-	def path_to_ino(self, some_path: Path_str, reuse_ino=0) -> int:
-		"""
-		Maps paths to inodes. Creates them if necessary
-		re-uses ino `reuse_ino` if != 0
-		:raise ValueError instead of asserts on logic errors
-		"""
-		path: str = self.toRoot(some_path)
-
-		if ino := self.path_ino_map.get(path):
-			ino = ino
-		elif reuse_ino != 0:  # for rename operations
-			if reuse_ino > self.__last_ino:
-				raise ValueError(f"Reused ino is larger than largest generated ino {reuse_ino} > {self.__last_ino}")
-			elif reuse_ino in self.__freed_inos:
-				ino = reuse_ino
-			else:
-				raise ValueError(f"Reused ino {reuse_ino} is not in freed ino set {self.__freed_inos}")
-		else:
-			ino = self.__last_ino + 1
-			self.__last_ino += 1
-		self.path_ino_map[path] = ino
-
-		return ino
-
-	def ino_to_path(self, some_ino: int) -> Path:
-		pass
 
 class AbstractDisk(Cache):
 	trans: InodeTranslator
@@ -326,7 +192,7 @@ class Disk(AbstractDisk):
 	def untrack(self, path: str) -> None:
 		"""Doesn't track `path` anymore and frees up its reserved size. Can be seen as a 'delete'"""
 		src_path: str = self.trans.toSrc(path).__str__()
-		timestamp = self.path_timestamp.get(src_path, default=None)
+		timestamp = self.path_timestamp.get(src_path)
 		if timestamp is None:
 			return
 

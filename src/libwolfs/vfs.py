@@ -15,7 +15,7 @@ from collections import defaultdict
 from pathlib import Path
 import logging
 log = logging.getLogger(__name__)
-from src.libwolfs.disk import PathTranslator
+from src.libwolfs.translator import PathTranslator
 from src.libwolfs.util import Col, CallStackAware, sizeof, formatByteSize
 from typing import Union, cast
 from src.libwolfs.fileInfo import FileInfo, DirInfo
