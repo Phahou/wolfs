@@ -333,7 +333,7 @@ class BasicOps(VFSOps):
 
 		attr = FileInfo.getattr(fd=fd)
 		attr.st_ino = self.disk.track(cpath.__str__())
-		self.vfs.addFilePath(inode_p, attr.st_ino, cpath, attr)
+		self.vfs.add_Child(inode_p, attr.st_ino, cpath, attr)
 
 		self.update_refs(fd, attr.st_ino)
 

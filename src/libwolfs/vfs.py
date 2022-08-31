@@ -112,7 +112,7 @@ class VFS(PathTranslator, CallStackAware):
 			# inode doesn't exist yet (not found)
 			return 0
 
-	def addFilePath(self, inode_p: int, inode: int, path: str, entry: pyfuse3.EntryAttributes) -> None:
+	def add_Child(self, inode_p: int, inode: int, path: str, entry: pyfuse3.EntryAttributes) -> None:
 		"""Also adds file to parent inode `inode_p`"""
 		assert inode_p != inode, f"{self} inode_p({Col(inode_p)}) can't be inode({Col(inode)})"
 		assert inode == entry.st_ino, 'entry ino must be the same as lookup ino'
