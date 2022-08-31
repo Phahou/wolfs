@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from src.fsops.xattrs import XAttrsOps
 import logging
+import stat
 log = logging.getLogger(__name__)
 # pretty much only dead code for now, but it will be used later on when the file system is a bit more
 # stable and needs  for example the extended xattrs funcs
@@ -38,16 +39,23 @@ class LinkOps(XAttrsOps):
 
 	async def symlink(self, inode_p: int, name: str, target: str, ctx: RequestContext) -> EntryAttributes:
 		raise FUSEError(errno.ENOSYS)
-
-		name = fsdecode(name)
-		target = fsdecode(target)
-		parent: Path = self.vfs.inode_to_cpath(inode_p)
-		path: str = os.path.join(parent, name)
+		parent_path: str = self.disk.trans.ino_to_path(inode_p)
+		assert not isinstance(parent_path, set), f"Something went horrendously wrong. A directory and has 2 hardlink paths: {parent_path}"
+		name: str = fsdecode(name)
+		symlink_path: str = parent_path + "/" + name
+		ino: int = self.disk.trans.path_to_ino(symlink_path)
 		try:
-			os.symlink(target, path)
-			os.chown(path, ctx.uid, ctx.gid, follow_symlinks=False)
+			os.symlink(target, symlink_path)
+			os.chown(symlink_path, ctx.uid, ctx.gid, follow_symlinks=False)
 		except OSError as exc:
 			raise FUSEError(exc.errno)
+		self.vfs.add_Child(inode_p, ino, symlink_path, self.getattr(ino))
+
+		# for softlinks
+
+		# target = fsdecode(target)
+		# parent: Path = self.vfs.inode_to_cpath(inode_p)
+		# path: str = os.path.join(parent, name)
 		#stat = os.lstat(path)
 		ino = self.disk.trans.path_to_ino(path)
 		lkup = self.vfs._lookup_cnt[ino]
