@@ -4,10 +4,7 @@ from queue import PriorityQueue
 
 import sys
 import traceback
-from IPython import embed
-
-embed = embed
-
+import os
 from typing import Callable
 import functools
 from datetime import datetime

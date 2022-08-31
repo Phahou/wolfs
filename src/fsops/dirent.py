@@ -36,7 +36,7 @@ class DirentOps(LinkOps):
 		#	4. update DirInfo of inode_p & new inode, track...
 		#	5. log to journal and sync later (assumption): no one modifies the directory on the backend
 		#	6. done
-		def validity_check():
+		def validity_check() -> None:
 			# abort if directory already exists (we have to check this virtually
 			# as Path.exists() might say no although it already exists in the src )
 			if self.vfs.getInodeOf(cpath, inode_p):
@@ -140,7 +140,7 @@ class DirentOps(LinkOps):
 		return inode
 
 	async def readdir(self, inode: int, off: int, token: pyfuse3.ReaddirToken) -> None:
-		def freeze_dirents():
+		def freeze_dirents() -> Union[tuple, list[tuple[int, str, pyfuse3.EntryAttributes]]]:
 			entries: Union[tuple, list[tuple[int, str, pyfuse3.EntryAttributes]]] = []
 			# copy attributes from src Filesystem
 			dirent = self.vfs.inode_path_map[inode]
@@ -185,7 +185,7 @@ class DirentOps(LinkOps):
 
 		i = 0
 		log.debug('  %d entries left, starting at offset/ino %d', len(s_entries), off)
-		# as we didnt tested posix compatibility yet we keep this warning:
+		# as we didn't test posix compatibility atm we keep this warning:
 		# 	This is not fully posix compatible. If there are hardlinks
 		# 	(two names with the same inode), we don't have a unique
 		# 	offset to start in between them. Note that we cannot simply

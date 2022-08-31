@@ -120,8 +120,17 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 			self.__fetchFile(self.disk.trans.toSrc(f), st_size)
 		return f
 
-	async def rename(self, inode_p_old: int, name_old: str, inode_p_new: int,
-					 name_new: str, flags: int, ctx: pyfuse3.RequestContext) -> None:
+	async def rename(self,
+			inode_p_old: int,
+			name_old: str,
+			inode_p_new: int,
+			name_new: str,
+			flags: int,
+			ctx: pyfuse3.RequestContext) -> None:
+		# if inode_p_old == inode_p_new:
+		# 	# just rename the paths
+		# 	path: str = self.disk.trans.ino_to_path(inode_p_old)
+
 		if flags != 0:
 			raise FUSEError(errno.EINVAL)
 
@@ -270,8 +279,7 @@ class BasicOps(VFSOps):
 		return await self.vfs.setattr(inode, attr, fields, fh, ctx)
 
 	async def getattr(self, inode: int, ctx: pyfuse3.RequestContext = None) -> pyfuse3.EntryAttributes:
-		inode_untranslated = inode
-		inode = self[inode_untranslated]
+		inode = self[inode]
 		entry = await self.vfs.getattr(inode, ctx)
 		path = self.vfs.inode_to_cpath(inode)
 		entry.st_ino = self.disk[path]

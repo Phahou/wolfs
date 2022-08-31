@@ -133,7 +133,7 @@ class Wolfs(DirentOps):
 				file_attrs.st_ino = st_ino
 				push_to_queue(st_ino, file_attrs)
 
-				self.vfs.addFilePath(dir_inode, st_ino, f, file_attrs)
+				self.vfs.add_Child(dir_inode, st_ino, f, file_attrs)
 				i = print_progress(i, 'add_path', st_ino, f)
 			i = print_progress(i, 'add_Directory', dir_inode, dirpath)
 

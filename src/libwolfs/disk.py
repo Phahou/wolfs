@@ -31,19 +31,19 @@ class AbstractDisk(Cache):
 
 	# just an indirection for shorthands
 	@property
-	def sourceDir(self):
+	def sourceDir(self) -> Path:
 		return self.trans.sourceDir
 
 	@sourceDir.setter
-	def sourceDir(self, _):
+	def sourceDir(self, _) -> None:
 		assert False, 'sourceDir will never be set after instanciation!'
 
 	@property
-	def cacheDir(self):
+	def cacheDir(self) -> Path:
 		return self.trans.cacheDir
 
 	@cacheDir.setter
-	def cacheDir(self, _):
+	def cacheDir(self, _) -> None:
 		assert False, 'cacheDir will never be set after instanciation!'
 
 	def __init__(self,  sourceDir: Path, cacheDir: Path, maxCacheSize: int, noatime: bool = True, cacheThreshold: float = 0.99):

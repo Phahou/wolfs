@@ -72,12 +72,10 @@ class TestVFSOps:
 		assert filecmp.cmp(name.replace(REMOTE, MNT_DIR), TEST_FILE)
 		checked_unlink(name, MNT_DIR)
 
-
 	def test_write_ops(self) -> None:
 		pass
 
 	# read test skipped as they are basically only a passthrough
-
 
 	#def test_rename_raise_ENOTDIR(self) -> None:
 	#	"""
