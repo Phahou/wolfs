@@ -46,7 +46,7 @@ class DirentOps(LinkOps):
 
 			MIN_DIR_SIZE: Final[int] = self.disk.MIN_DIR_SIZE
 			bytes_avail: Final[int] = self.journal.src_bytes_avail
-			cache_ok: bool = self.disk.canReserve(MIN_DIR_SIZE)
+			cache_ok: bool = self.disk.canStore(MIN_DIR_SIZE)
 
 			bytes_unwritten = self.journal.bytes_unwritten
 			src_ok: bool = (bytes_unwritten + MIN_DIR_SIZE) < bytes_avail

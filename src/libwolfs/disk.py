@@ -108,25 +108,14 @@ class Disk(AbstractDisk):
 		return added_size, added_folders
 
 	# Size related
-
-	@staticmethod
-	def getSize(path: str = '.') -> int:
-		""":returns: Size of path. Skips symbolic links"""
-		total_size = 0
-		for dirpath, dirnames, filenames in os.walk(path):
-			for f in filenames:
-				fp = os.path.join(dirpath, f)
-				# skip if it is symbolic link
-				if not os.path.islink(fp):
-					total_size += os.path.getsize(fp)
-		return total_size
-
-	def canReserve(self, size: int) -> bool:
-		return (size + self._current_CacheSize) < self.maxCacheSize
-
-	def canStore(self, path: Path) -> bool:
+	def canStore(self, size_or_path: Path) -> bool:
 		"""Does the cache have room  for `path` ?"""
-		if isinstance(path, Path):
+		if isinstance(size_or_path, int):
+			size: int = size_or_path
+			return (size + self._current_CacheSize) < self.maxCacheSize
+
+		elif isinstance(size_or_path, Path):
+			path: Path = size_or_path
 			# TODO: maybe try to get filesize via lstat (like stat but supports links)
 			src = path.__str__() # if isinstance(path, Path) else path
 			assert not os.path.islink(src), f"{self} {SOFTLINK_DISABLED_ERROR}"
@@ -142,17 +131,17 @@ class Disk(AbstractDisk):
 			cache_size = in_between_dir_sizes + os.path.getsize(src) + self._current_CacheSize
 			return cache_size <= self.maxCacheSize
 
-		assert False, f'{self}: Types are wrong: {path}({type(path)}) not in [Path, str, FileInfo]'
-
-	def isFilledBy(self, percent: float) -> bool:
-		""":param percent: between [0.0, 1.0]"""
-		assert 0.0 <= percent <= 1.0, 'disk_isFullBy: needs to be [0-1]'
-		diskUsage = self._current_CacheSize / self.maxCacheSize
-		return True if diskUsage >= percent else False
+		assert False, f'{self}: Types are wrong: {size_or_path}({type(size_or_path)}) not in [Path, str, FileInfo]'
 
 	def isFull(self, use_threshold: bool = False) -> bool:
+		def isFilledBy(percent: float) -> bool:
+			""":param percent: between [0.0, 1.0]"""
+			assert 0.0 <= percent <= 1.0, 'disk_isFullBy: needs to be [0-1]'
+			diskUsage = self._current_CacheSize / self.maxCacheSize
+			return True if diskUsage >= percent else False
+
 		percentage = self._cacheThreshold if use_threshold else 1.0
-		return self.isFilledBy(percentage)
+		return isFilledBy(percentage)
 
 	# Book-Keeping related
 

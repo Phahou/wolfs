@@ -56,7 +56,7 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 		inode_p: int = 0, wolfs_inode_path: str = "") -> DirInfo:
 		trans = self.disk.trans
 		assert inode_p >= 0\
-			or (wolfs_inode_path != "" and trans.toRoot(wolfs_inode_path) in trans.path_ino_map)
+			or (wolfs_inode_path != "" and trans.toRoot(wolfs_inode_path) in trans._InodeTranslator__path_ino_map)
 
 		if inode_p > 0:
 			# TODO: path_to_ino -> inode_to_cpath should be in the same class as they are interchangeable
