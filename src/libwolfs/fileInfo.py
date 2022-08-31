@@ -51,6 +51,10 @@ class FileInfo:
 		entry.st_blksize = 512
 		entry.st_blocks = ((entry.st_size + entry.st_blksize - 1) // entry.st_blksize)
 
+		# explicitly mark st_ino as missing as we can't set it here.
+		# InodeTranslator needs to give this entry the correct ino
+		del entry.st_ino
+
 		return entry
 
 	@staticmethod
