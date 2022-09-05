@@ -39,7 +39,7 @@ class DirentOps(LinkOps):
 		def validity_check() -> None:
 			# abort if directory already exists (we have to check this virtually
 			# as Path.exists() might say no although it already exists in the src )
-			if self.vfs.getInodeOf(cpath, inode_p):
+			if self.disk.path_to_ino(cpath):
 				log.warning(f"Tried to make a directory that already exists:"
 							f"  mkdir({parent_path},{name},{hex(mode)})")
 				raise FUSEError(errno.EEXIST)

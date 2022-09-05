@@ -155,7 +155,7 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 		inode_p_old, inode_p_new = self[inode_p_old], self[inode_p_new]
 		path_old, path_new = join(ino2Path(inode_p_old), fsdecode(name_old)), join(ino2Path(inode_p_new),
 																				   fsdecode(name_new))
-		ino_old = self.vfs.getInodeOf(path_old, inode_p_old)
+		ino_old = self.disk.path_to_ino(path_old, reuse_ino=inode_p_old)
 
 		if os.path.exists(path_new):  # calls lookup and fails if path_new will be overwritten
 			raise FUSEError(errno.EINVAL)
@@ -352,8 +352,7 @@ class BasicOps(VFSOps):
 		try:
 			if os.path.exists(path):  # file exists in cache
 				os.unlink(path)
-			self.vfs.getInodeOf(path, inode_p)  # check if path still exists virtually
-			inode = self.disk[path]
+			inode = self.disk.path_to_ino(path)
 		except OSError as exc:
 			raise FUSEError(exc.errno)
 

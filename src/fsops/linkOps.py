@@ -64,7 +64,7 @@ class LinkOps(XAttrsOps):
 		result = await self.getattr(stat.st_ino)
 
 		# post conditions:
-		assert self.vfs.getInodeOf(name, inode_p) > 0, "Symbol link named *name* shall be in *inode_p*"
+		assert self.disk.path_to_ino(parent_path) == inode_p, "Symbol link named *name* shall be in *inode_p*"
 		assert self.readlink(ino, None) == target,  "Symbol link shall point to *target*"
 		assert isinstance(result, EntryAttributes), "Return type shall be `EntryAttributes`"
 		assert lkup + 1 == self.vfs._lookup_cnt[ino], "On Sucess: Lookup Count shall increase by 1"

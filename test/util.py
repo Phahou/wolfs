@@ -5,6 +5,7 @@ import time
 import os
 import string
 MAX_PATH_SIZE: int = 4096
+MNT_PATH = "/mnt/wolfs"
 
 def coinflip() -> bool:
 	return True if random.choice([0, 1]) == 0 else False
@@ -32,8 +33,3 @@ def pseudo_file(test_file: str, wanted_filesize: int = None) -> None:
 		f.seek((wanted_filesize * 1024) - 1)
 		f.write(b"\0")
 	assert os.stat(test_file).st_size == 1024 * wanted_filesize
-
-
-def mount_fs() -> str:
-
-	return
