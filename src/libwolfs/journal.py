@@ -256,7 +256,7 @@ class Journal:
 		return
 
 		# oh, actually we can just diff for the size lol
-		curr_size = cast(FileInfo, self.vfs.get_FileInfo(inode)).entry.st_size
+		curr_size = self.vfs.inode_path_map[inode].entry.st_size
 		prev_size = self.__inode_dirty_map2[inode]
 
 		self.bytes_unwritten += (curr_size - prev_size)

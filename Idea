@@ -1,6 +1,3 @@
-we might need to roll with our own implementation of a inode number generator as currently cache_dir and srcDir inodes
-are mixed and this in turn leads to the problem that files cant be found or moved as their inodes mismatch
-
 wolfs soll:
  - LRU Caching können ( nach Dateigröße )
    -> löst Storage Management
@@ -21,13 +18,13 @@ wolfs soll:
    -> Ermöglicht auch uneingehängt zu starten
  - [ ] Möglichkeit entfernten Ordner automatisch zu mounten durch wakeonlan
  -> Dateien holen falls nicht vorhanden
- => [ ] bei open bzw list befehlen nachschauen ob die Datei bereits irgendwo lokal bereits ist
+ => [ ] bei open bzw list befehlen nachschauen ob die Datei bereits lokal da ist
 
 
 Ordner-Aufbau:
 -> remote ( Einhängepunkt für entferntes Dateisystem )
--> local_data  ( Lokale Daten von remote werden hier abgespeichert und mittels LRU verdrängt )
--> mountpoint   ( mountpoint den andere Programme benutzen )
+-> /tmp/wolfs  ( Lokale Daten von remote werden hier abgespeichert und mittels LRU verdrängt )
+-> /mnt/wolfs  ( mountpoint den andere Programme benutzen )
 Zusatzdateien:
 -> metafile ( b-baum? ordneraufbau, stat, etc,  )
 -> logfile  ( journal file )

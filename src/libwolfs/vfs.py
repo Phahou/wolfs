@@ -25,13 +25,6 @@ from src.libwolfs.errors import SOFTLINK_DISABLED_ERROR, HARDLINK_DIR_ILLEGAL_ER
 ########################################################################################################################
 
 class VFS(PathTranslator, CallStackAware):
-	__next_inode: int = pyfuse3.ROOT_INODE
-
-	def __inode_generator(self) -> int:
-		inode = self.__next_inode
-		self.__next_inode += 1
-		return inode
-
 	# I need to save all os operations in this so if os.lstat is called I can pretend I actually know the stuff
 	def __init__(self, sourceDir: Path, cacheDir: Path):
 		super().__init__(sourceDir, cacheDir)
@@ -51,9 +44,6 @@ class VFS(PathTranslator, CallStackAware):
 
 	def already_open(self, inode: int) -> bool:
 		return inode in self._inode_fd_map
-
-	def getRamUsage(self) -> str:
-		return formatByteSize(sizeof(self.inode_path_map))
 
 	# "properties"
 	def del_inode(self, inode: int) -> None:
@@ -84,33 +74,8 @@ class VFS(PathTranslator, CallStackAware):
 			val = next(iter(val))  # In case of hardlinks, pick any path
 		return val
 
-	def get_FileInfo(self, inode: int) -> FileInfo:
-		return self.inode_path_map[inode]
-
 	# inode <-> path funcs
 	# ====================
-
-	# search for an inode via path
-	def getInodeOf(self, path: str, inode_p: int) -> int:
-		"""
-		Get Inode referencing ´path´ which is in directory inode ´inode_p´
-		:returns <=0 on failure
-		:returns  >0 on success
-		"""
-		i2p = self.inode_to_cpath
-		#info: DirInfo = cast(DirInfo, self.inode_path_map[inode_p])
-		children: list[int] = cast(DirInfo, self.inode_path_map[inode_p]).children
-
-		assert children, f'children is None {self.inode_path_map[inode_p].__str__()}'
-		paths: list[tuple[int, str]] = [(ino, i2p(ino).__str__()) for ino in children]
-		old_inode: list[tuple[int, str]] = list(filter(lambda x: x[1] == path, paths))
-		assert len(old_inode) < 2, f'We have 2 full_paths?'
-
-		if old_inode:
-			return old_inode[0][0]
-		else:
-			# inode doesn't exist yet (not found)
-			return 0
 
 	def add_Child(self, inode_p: int, inode: int, path: str, entry: pyfuse3.EntryAttributes) -> None:
 		"""Also adds file to parent inode `inode_p`"""

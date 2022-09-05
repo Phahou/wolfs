@@ -50,10 +50,9 @@ class FileInfo:
 
 		entry.st_blksize = 512
 		entry.st_blocks = ((entry.st_size + entry.st_blksize - 1) // entry.st_blksize)
-
-		# explicitly mark st_ino as missing as we can't set it here.
-		# InodeTranslator needs to give this entry the correct ino
-		del entry.st_ino
+		# st_ino can't be set here as we don't have access to InodeTranslator
+		# but ino == 0 is either way an error as we begin counting at 1 in our table
+		# so if there is a slipup it will be noticed immediately
 
 		return entry
 

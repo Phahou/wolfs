@@ -17,60 +17,14 @@ import errno
 import os
 import logging
 from pyfuse3 import FUSEError
-from src.libwolfs.util import Col, formatByteSize, Path_str
+from src.libwolfs.util import Col, Path_str
 from src.libwolfs.errors import NotEnoughSpaceError, SOFTLINK_DISABLED_ERROR
-from typing import Union, Final, get_args
-from src.libwolfs.translator import InodeTranslator
+from typing import Union
 from src.libwolfs.cache import Cache
 
 log = logging.getLogger(__name__)
-Path_str = Union[str, Path]
-
-class AbstractDisk(Cache):
-	trans: InodeTranslator
-
-	# just an indirection for shorthands
-	@property
-	def sourceDir(self) -> Path:
-		return self.trans.sourceDir
-
-	@sourceDir.setter
-	def sourceDir(self, _) -> None:
-		assert False, 'sourceDir will never be set after instanciation!'
-
-	@property
-	def cacheDir(self) -> Path:
-		return self.trans.cacheDir
-
-	@cacheDir.setter
-	def cacheDir(self, _) -> None:
-		assert False, 'cacheDir will never be set after instanciation!'
-
-	def __init__(self,  sourceDir: Path, cacheDir: Path, maxCacheSize: int, noatime: bool = True, cacheThreshold: float = 0.99):
-		super().__init__(maxCacheSize, noatime, cacheThreshold)
-		self.trans = InodeTranslator(sourceDir, cacheDir)
-
-	# getting inode and path info
-	def __getitem__(self, item: Union[int, Path_str]) -> int:
-		""""""
-		if isinstance(item, int):
-			print("????")
-		if isinstance(item, get_args(Path_str)):
-			if isinstance(item, Path_str):
-				ino = self.trans.path_to_ino(item)
-			else: # int
-				path, reused_ino = item
-				ino = self.trans.path_to_ino(path, reused_ino)
-		else:
-			assert False, f"TypeError: '{type(item)}' is not supported"
-		return ino
-
 
 class Disk(Cache):
-
-	def __init__(self, sourceDir: Path, cacheDir: Path, maxCacheSize: int, noatime: bool = True,
-				 cacheThreshold: float = 0.99):
-		super().__init__(sourceDir, cacheDir, maxCacheSize, noatime, cacheThreshold)
 
 	# ==========
 	# public api
