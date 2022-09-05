@@ -105,7 +105,7 @@ class TestDisk:
 		disk = prep_Disk(tmpdir_source, tmpdir_cache, maxCacheSize=1)
 		DIRECOTRIES_PER_MEGABYTE = int(1024 // 4)  # 256
 
-		# for for normal operation: (directory parents are available)
+		# for normal operation: (directory parents are available)
 		enough: Path = Path(os.path.join(tmpdir_source, name_generator()))
 		for i in range(1, 5):
 			pseudo_file(enough, i * DIRECOTRIES_PER_MEGABYTE)
@@ -144,6 +144,7 @@ class TestDisk:
 		os.remove(subdir_not_enough)
 		os.rmdir(subdir_not_enough_root)
 
+	@pytest.mark.skip
 	def test_copystat(self, tmpdir_factory):
 		tmpdir_source, _ = get_src_cache_directory_pair(tmpdir_factory)
 		# LATER: also copy xAttrs if there are any

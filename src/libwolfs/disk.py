@@ -66,7 +66,7 @@ class AbstractDisk(Cache):
 		return ino
 
 
-class Disk(AbstractDisk):
+class Disk(Cache):
 
 	def __init__(self, sourceDir: Path, cacheDir: Path, maxCacheSize: int, noatime: bool = True,
 				 cacheThreshold: float = 0.99):
@@ -132,16 +132,6 @@ class Disk(AbstractDisk):
 			return cache_size <= self.maxCacheSize
 
 		assert False, f'{self}: Types are wrong: {size_or_path}({type(size_or_path)}) not in [Path, str, FileInfo]'
-
-	def isFull(self, use_threshold: bool = False) -> bool:
-		def isFilledBy(percent: float) -> bool:
-			""":param percent: between [0.0, 1.0]"""
-			assert 0.0 <= percent <= 1.0, 'disk_isFullBy: needs to be [0-1]'
-			diskUsage = self._current_CacheSize / self.maxCacheSize
-			return True if diskUsage >= percent else False
-
-		percentage = self._cacheThreshold if use_threshold else 1.0
-		return isFilledBy(percentage)
 
 	# Book-Keeping related
 
@@ -340,11 +330,3 @@ class Disk(AbstractDisk):
 	# Print functions
 	# ===============
 
-	def getSummary(self) -> str:
-		diskUsage = Col.path(f'{Col.BY}{(100 * self._current_CacheSize / self.maxCacheSize):.8f}%')
-		usedCache = Col.path(formatByteSize(self._current_CacheSize))
-		MAX_CACHE_SIZE = Col.path(formatByteSize(self.maxCacheSize))
-		copySummary =\
-			f'{Col.BW}Cache is currently storing {Col(len(self.in_cache))} elements and is {diskUsage} '\
-			+ f' full (used: {usedCache} / {MAX_CACHE_SIZE} )'
-		return str(copySummary)

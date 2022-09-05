@@ -29,6 +29,7 @@ from IPython import embed
 
 embed = embed
 from typing import Final, cast
+import shutil
 
 Write_Op = tuple[int, int]
 INVALID_VALUE: Final[int] = -1

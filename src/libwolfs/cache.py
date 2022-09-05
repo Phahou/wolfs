@@ -1,14 +1,17 @@
 #!/usr/bin/env python
 from sortedcontainers import SortedDict
 from typing import Final
-from src.libwolfs.translator import DiskBase
+from pathlib import Path
+from src.libwolfs.translator import DiskBase, InodeTranslator
 from os import mkdir, rmdir, stat
+from src.libwolfs.util import Col, Path_str, formatByteSize
 
-class Cache(DiskBase):
+class Cache(InodeTranslator):
 	maxCacheSize: Final[int]
 	MIN_DIR_SIZE: Final[int]
 
-	def __init__(self, maxCacheSize: int, noatime: bool = True, cacheThreshold: float = 0.99):
+	def __init__(self, sourceDir: Path, cacheDir: Path, maxCacheSize: int, noatime: bool = True, cacheThreshold: float = 0.99):
+		super(Cache, self).__init__(sourceDir, cacheDir)
 		# get OS dependant minimum directory size
 		mkdir('wolfs_tmp_directory')
 		self.MIN_DIR_SIZE = stat('wolfs_tmp_directory').st_size
@@ -24,6 +27,9 @@ class Cache(DiskBase):
 		self.path_timestamp: dict[str, int] = dict()
 		self._cached_inos: dict[int, bool] = dict()
 
+		# compatibility to old code use remove later
+		self.trans = self
+
 	# fullness of cache
 	def __le__(self, other: int) -> bool:
 		"""Is the cache large enough to hold `size` ?"""
@@ -37,3 +43,22 @@ class Cache(DiskBase):
 
 	def __ge__(self, other: int) -> bool:
 		return other >= self.maxCacheSize
+
+	def isFull(self, use_threshold: bool = False) -> bool:
+		def isFilledBy(percent: float) -> bool:
+			""":param percent: between [0.0, 1.0]"""
+			assert 0.0 <= percent <= 1.0, 'disk_isFullBy: needs to be [0-1]'
+			diskUsage = self._current_CacheSize / self.maxCacheSize
+			return True if diskUsage >= percent else False
+
+		percentage = self._cacheThreshold if use_threshold else 1.0
+		return isFilledBy(percentage)
+
+	def getSummary(self) -> str:
+		diskUsage = Col.path(f'{Col.BY}{(100 * self._current_CacheSize / self.maxCacheSize):.8f}%')
+		usedCache = Col.path(formatByteSize(self._current_CacheSize))
+		MAX_CACHE_SIZE = Col.path(formatByteSize(self.maxCacheSize))
+		copySummary =\
+			f'{Col.BW}Cache is currently storing {Col(len(self.in_cache))} elements and is {diskUsage} '\
+			+ f' full (used: {usedCache} / {MAX_CACHE_SIZE} )'
+		return str(copySummary)

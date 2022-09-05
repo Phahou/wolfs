@@ -282,7 +282,7 @@ class BasicOps(VFSOps):
 		inode = self[inode]
 		entry = await self.vfs.getattr(inode, ctx)
 		path = self.vfs.cpath(inode)
-		entry.st_ino = self.disk[path]
+		entry.st_ino = self.disk.trans.path_to_ino(path)
 		return entry
 
 	# File methods (functions with file descriptors)
