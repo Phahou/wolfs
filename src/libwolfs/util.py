@@ -5,11 +5,12 @@ from queue import PriorityQueue
 import sys
 import traceback
 import os
-from typing import Callable
+from typing import Callable, Union
 import functools
 from datetime import datetime
 import inspect
 
+Path_str = Union[str, Path]
 
 # this can be ignored fully as logging supports this too.....
 # https://stackoverflow.com/questions/533048/how-to-log-source-file-name-and-line-number-in-python

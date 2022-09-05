@@ -60,11 +60,11 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 
 		if inode_p > 0:
 			# TODO: path_to_ino -> inode_to_cpath should be in the same class as they are interchangeable
-			assert_path: str = self.disk.trans.toRoot(self.vfs.inode_to_cpath(inode_p))
+			assert_path: str = self.disk.trans.toRoot(self.vfs.cpath(inode_p))
 			assert inode_p == trans.path_to_ino(assert_path)
 		else:
 			inode_p = trans.path_to_ino(wolfs_inode_path)
-			assert inode_p == self.vfs.inode_to_cpath(inode_p)
+			assert inode_p == self.vfs.cpath(inode_p)
 
 		assert inode_p not in child_inodes
 		assert inode_p in self.vfs.inode_path_map
@@ -113,7 +113,7 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 		self.disk.cp2Cache(f, force=True, open_paths=open_paths)
 
 	def fetchFile(self, inode: int) -> Path:
-		f: Path = self.vfs.inode_to_cpath(inode)
+		f: Path = self.vfs.cpath(inode)
 		st_size: int = self.vfs.inode_path_map[inode].entry.st_size
 		if not f.exists():
 			self.remote.makeAvailable()
@@ -149,7 +149,7 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 		#       ----
 		#       flags could cause an issue later on though so they are disabled for now
 		# get everything we need
-		join, ino2Path = os.path.join, self.vfs.inode_to_cpath
+		join, ino2Path = os.path.join, self.vfs.cpath
 		inoPathMap: dict[int, FileInfo] = self.vfs.inode_path_map
 
 		inode_p_old, inode_p_new = self[inode_p_old], self[inode_p_new]
@@ -224,7 +224,7 @@ class BasicOps(VFSOps):
 	def _forget_path(self, inode: int, path: str) -> None:
 		# gets called internally so no translation
 		log.debug(f'{Col(path)} as ino {Col(inode)}')
-		val = self.vfs.inode_to_cpath(inode)
+		val = self.vfs.cpath(inode)
 		if isinstance(val, set):
 			val.remove(path)
 			if len(val) == 1:
@@ -250,13 +250,13 @@ class BasicOps(VFSOps):
 			if name != '.' and name != '..':
 				self.vfs._lookup_cnt[st_ino] += 1
 
-		path: Path = self.vfs.inode_to_cpath(inode_p) / Path(name)
+		path: Path = self.vfs.cpath(inode_p) / Path(name)
 
 		# check if directory and children are known
 		info = self.vfs.inode_path_map[inode_p]
 		if isinstance(info, DirInfo):
 			for child_inode in info.children:
-				if path == self.vfs.inode_to_cpath(child_inode):
+				if path == self.vfs.cpath(child_inode):
 					incLookupCount(inode_p)
 					assert child_inode == self.vfs.inode_path_map[child_inode].entry.st_ino
 					return self.vfs.inode_path_map[child_inode].entry
@@ -281,7 +281,7 @@ class BasicOps(VFSOps):
 	async def getattr(self, inode: int, ctx: pyfuse3.RequestContext = None) -> pyfuse3.EntryAttributes:
 		inode = self[inode]
 		entry = await self.vfs.getattr(inode, ctx)
-		path = self.vfs.inode_to_cpath(inode)
+		path = self.vfs.cpath(inode)
 		entry.st_ino = self.disk[path]
 		return entry
 
@@ -323,7 +323,7 @@ class BasicOps(VFSOps):
 	async def create(self, inode_p: int, name: str, mode: int, flags: int,
 					 ctx: pyfuse3.RequestContext) -> (pyfuse3.FileInfo, pyfuse3.EntryAttributes):
 		inode_p = self[inode_p]
-		cpath: str = os.path.join(self.vfs.inode_to_cpath(inode_p), fsdecode(name))
+		cpath: str = os.path.join(self.vfs.cpath(inode_p), fsdecode(name))
 		log.debug(f'{Col(cpath)} in {Col(inode_p)}')
 
 		try:
@@ -347,7 +347,7 @@ class BasicOps(VFSOps):
 		inode_p = self[inode_p]
 		name = fsdecode(name)
 		log.debug(f'{Col(name)} in {Col(inode_p)}')
-		parent = self.vfs.inode_to_cpath(inode_p)
+		parent = self.vfs.cpath(inode_p)
 		path = os.path.join(parent, name)
 		try:
 			if os.path.exists(path):  # file exists in cache
@@ -449,7 +449,7 @@ class NodeOps(BasicOps):
 		"""Easisest function to get an entrypoint into the code (not many df calls all around)"""
 		root_ino = DiskBase.ROOT_INODE
 		self.printAllInodes()
-		root = self.vfs.inode_to_cpath(root_ino)
+		root = self.vfs.cpath(root_ino)
 		stat_ = pyfuse3.StatvfsData()
 		try:
 			statfs = os.statvfs(root)
@@ -472,7 +472,7 @@ class NodeOps(BasicOps):
 		# create special or ordinary file
 		# mostly used for fifo / pipes but nowadays mkfifo would be better suited for that
 		# mostly rare use cases
-		path = os.path.join(self.vfs.inode_to_cpath(inode_p), fsdecode(name))
+		path = os.path.join(self.vfs.cpath(inode_p), fsdecode(name))
 		log.info(f"{inode_p} {path} mode: {mode}, rdev: {rdev}")
 		try:
 			os.mknod(path, mode=(mode & ~ctx.umask), device=rdev)

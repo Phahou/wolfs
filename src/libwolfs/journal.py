@@ -216,7 +216,7 @@ class Journal:
 			if logEntry.op != File_Ops.WRITE:
 				continue
 			(_, bytes_written) = getattr(logEntry, 'writes')
-			dirty_paths.append(self.vfs.inode_to_cpath(logEntry.inode))
+			dirty_paths.append(self.vfs.cpath(logEntry.inode))
 			write_ops_reserved_size += bytes_written
 		return dirty_paths, write_ops_reserved_size
 
@@ -242,7 +242,7 @@ class Journal:
 
 	def log_write(self, inode: int, offset: int, bytes_written: int) -> None:
 		self.__markDirty(inode)
-		e: LogEntry = LogEntry(File_Ops.WRITE, inode, self.vfs.inode_to_cpath(inode).__str__())
+		e: LogEntry = LogEntry(File_Ops.WRITE, inode, self.vfs.cpath(inode).__str__())
 		e.writes = (offset, bytes_written)
 		self.__history.append(e)
 

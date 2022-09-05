@@ -17,7 +17,7 @@ import errno
 import os
 import logging
 from pyfuse3 import FUSEError
-from src.libwolfs.util import Col, formatByteSize
+from src.libwolfs.util import Col, formatByteSize, Path_str
 from src.libwolfs.errors import NotEnoughSpaceError, SOFTLINK_DISABLED_ERROR
 from typing import Union, Final, get_args
 from src.libwolfs.translator import InodeTranslator
