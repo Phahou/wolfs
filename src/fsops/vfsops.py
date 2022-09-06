@@ -478,6 +478,6 @@ class NodeOps(BasicOps):
 		except OSError as exc:
 			raise FUSEError(exc.errno)
 		attr = FileInfo.getattr(path=path)
-		attr.st_ino = self.disk[path]
+		attr.st_ino = self.disk.path_to_ino(path)
 		self.vfs.add_path(attr.st_ino, path)
 		return attr

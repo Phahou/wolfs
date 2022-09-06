@@ -17,7 +17,11 @@ class DirentOps(LinkOps):
 	# used to temporarily store directory entries while a readdir call is performed
 	freezed_dirents: dict[int: [int]] = dict()
 
-	async def mkdir(self, inode_p: int, name: str, mode: int, ctx: pyfuse3.RequestContext) -> pyfuse3.EntryAttributes:
+	async def mkdir(self,
+			inode_p: int,
+			name: str,
+			mode: int,
+			ctx: pyfuse3.RequestContext) -> pyfuse3.EntryAttributes:
 		# in cache:
 		#		- [x] mkdir normally, update DirInfo of parent and create a DirInfo for new ino
 		# in src:
@@ -36,7 +40,7 @@ class DirentOps(LinkOps):
 		def validity_check() -> None:
 			# abort if directory already exists (we have to check this virtually
 			# as Path.exists() might say no although it already exists in the src )
-			if self.disk.path_to_ino(cpath):
+			if self.disk.path_to_ino(cpath) == inode_p:
 				log.warning(f"Tried to make a directory that already exists:"
 							f"  mkdir({parent_path},{name},{hex(mode)})")
 				raise FUSEError(errno.EEXIST)
@@ -75,7 +79,7 @@ class DirentOps(LinkOps):
 		# 4. update bookkeeping
 		attr = FileInfo.getattr(path=cpath)
 		attr.st_ino = self.disk.track(cpath)
-		self.add_Directory(inode_p, attr.st_ino, cpath)
+		self.add_Directory(cpath)
 		assert isinstance(self.vfs.inode_path_map[attr.st_ino], DirInfo), f"Logical error: {attr.st_ino} should be of type DirInfo"
 		self.journal.log_mkdir(inode_p, attr.st_ino, cpath, mode)
 
