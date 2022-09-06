@@ -18,18 +18,6 @@ def clean_VFS():
 ###################################################
 @pytest.mark.skip
 class TestVFS:
-	def test_toPathFuncs(self):
-		pass
-
-	def test_inode_to_cpath(self):
-		pass
-
-	def test_del_inode(self):
-		pass
-
-	def test_getInodeOf(self):
-		pass
-
 	def test_addDirectory(self):
 		pass
 

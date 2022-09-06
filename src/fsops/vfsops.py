@@ -74,25 +74,25 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 		directory.children += child_inodes
 		return directory
 
-	def add_Directory(self, wolfs_inode_path: str) -> DirInfo:
-		wolfs_inode: int = self.disk.trans.path_to_ino(wolfs_inode_path)
+	def add_Directory(self, path: str) -> DirInfo:
+		wolfs_inode: int = self.disk.trans.path_to_ino(path)
 
 		# get inode info about parent
 
-		inode_p_path = self.disk.trans.getParent(wolfs_inode_path)
+		inode_p_path = self.disk.trans.getParent(path)
 		inode_p = self.disk.trans.path_to_ino(inode_p_path)
 
-		entry = FileInfo.getattr(path=wolfs_inode_path)
+		entry = FileInfo.getattr(path=path)
 		entry.st_ino = wolfs_inode
 
 		# consitency checks
 		assert wolfs_inode != inode_p \
 			or wolfs_inode == DiskBase.ROOT_INODE  # exception so that '/' redirects to itself
 		assert entry.st_ino == wolfs_inode
-		assert Path(wolfs_inode_path).is_dir()
+		assert Path(path).is_dir()
 		assert self.disk.trans.path_to_ino(inode_p_path) == inode_p
 
-		return self.vfs._add_Directory(inode_p, wolfs_inode, wolfs_inode_path, entry)
+		return self.vfs._add_Directory(inode_p, wolfs_inode, path, entry)
 
 	def __fetchFile(self, f: Path, size: int) -> None:
 		"""

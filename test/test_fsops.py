@@ -3,12 +3,10 @@
 # mypy ignore whole file
 # type: ignore
 
-from IPython import embed
+from pathlib import Path
+SKIP = False
 
-TEST_FILE = __file__
-TEST_PATH = './mnt/mountpoint'
 import pytest
-import time
 import os
 
 # ------------------------------------------------------------------
@@ -20,37 +18,29 @@ import os
 # multiple sets of input that get tested
 
 #@pytest.mark.<some marker> can then be used in $ pytest -m <marker>
+# @pytest.mark.skipif(not Path(MNT_PATH).is_mount() or SKIP, reason=f"{MNT_PATH} is not mounted or SKIP=True")
 @pytest.mark.skip
 class TestFSOperations:
-    def copy_sameAttrsAsSrcDir(self):
+    def test_copy_sameAttrsAsSrcDir(self):
         pass
 
-    def copy_onlyCachesMostRecentFiles(self):
+    def test_copy_onlyCachesMostRecentFiles(self):
         pass
 
-    def open_RedirectsToCacheFile(self):
+    def test_open_RedirectsToCacheFile(self):
         pass
 
-    def read_redirectsToCache(self):
+    def test_read_redirectsToCache(self):
         pass
 
-    def readdir_sameAsSrcDir(self):
+    def test_readdir_sameAsSrcDir(self):
         pass
 
-    def tst_listDir(self):
-        adir = os.listdir(TEST_PATH)
-        print(adir)
+    def test_listDir(self):
+        pass
 
-    def tst_deepDir(self):
-        adir = os.listdir(TEST_PATH + '/Ordner')
-        print(adir)
+    def test_deepDir(self):
+        pass
 
-    def openFile(self):
-        with open(os.path.join(TEST_PATH, 'read.txt'),'r') as f:
-            f.read()
-
-
-#def test_DirectoryAPI():
-#    runTest(tst_listDir)
-#    runTest(tst_deepDir)
-#    runTest(openFile)
+    def test_openFile(self):
+        pass
