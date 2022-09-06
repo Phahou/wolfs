@@ -13,7 +13,7 @@ import errno
 from pyfuse3 import FUSEError
 from os import fsdecode
 from src.libwolfs.disk import Disk
-from src.libwolfs.translator import DiskBase
+from src.libwolfs.translator import DiskBase, MountFSDirectoryInfo
 from src.libwolfs.util import Col
 from src.libwolfs.vfs import VFS
 from src.libwolfs.fileInfo import FileInfo, DirInfo
@@ -41,12 +41,11 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 		"""translate pyfuse3.ROOT_INODE into our ROOT_INODE"""
 		return inode if inode != FUSE_ROOT_INODE else DiskBase.ROOT_INODE
 
-	def __init__(self, node: RemoteNode, sourceDir: Path, cacheDir: Path,
+	def __init__(self, node: RemoteNode, mount_info: MountFSDirectoryInfo,
 				 logFile: Path, maxCacheSizeMB: int = _DEFAULT_CACHE_SIZE, noatime: bool = True):
 		super().__init__()
-		sourceDir, cacheDir = Path(sourceDir), Path(cacheDir)
-		self.disk = Disk(sourceDir, cacheDir, maxCacheSizeMB, noatime)
-		self.vfs = VFS(sourceDir, cacheDir)
+		self.disk = Disk(mount_info, maxCacheSizeMB, noatime)
+		self.vfs = VFS(mount_info)
 		self.journal = Journal(self.disk, self.vfs, logFile)
 		self.remote = node
 

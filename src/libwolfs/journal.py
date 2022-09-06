@@ -295,6 +295,6 @@ class Journal:
 	def log_mkdir(self, inode_p: int, inode: int, path: str, mode: int) -> None:
 		self.__markDirty(inode)
 		self.__markDirty(inode_p)
-		e: LogEntry = LogEntry(File_Ops.MKDIR, path=path)
+		e: LogEntry = LogEntry(File_Ops.MKDIR, inode, path=path)
 		e.mode = mode
 		self.__history.append(e)

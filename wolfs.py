@@ -11,6 +11,7 @@ import sys
 from src.remote import RemoteNode
 from src.fsops.vfsops import VFSOps
 from src.libwolfs.util import Col
+from src.libwolfs.translator import MountFSDirectoryInfo
 
 DEBUG = False
 DEBUG_FUSE = False
@@ -99,8 +100,10 @@ def parse_args(args):
 def main():
     options = parse_args(sys.argv[1:])
     init_logging(options.debug)
-    remote = RemoteNode(options.source, options.mountpoint, 'ext4', None, None, None)
-    operations = Operations(remote, options.source, options.cache, metadb=options.metadb, logFile=options.log,
+    src, cache, mount = options.source, options.cache, options.mountpoint
+    remote = RemoteNode(src, mount, 'ext4', None, None, None)
+    mount_info = MountFSDirectoryInfo(src, cache, mount)
+    operations = Operations(remote, mount_info, metadb=options.metadb, logFile=options.log,
                             maxCacheSizeMB=options.size)
 
     # log.debug('Mounting...')

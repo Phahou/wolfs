@@ -25,6 +25,7 @@ from src.libwolfs.util import Col, MaxPrioQueue
 from src.fsops.vfsops import VFSOps
 from src.libwolfs.fileInfo import FileInfo, DirInfo
 from src.libwolfs.errors import NotEnoughSpaceError
+from src.libwolfs.translator import MountFSDirectoryInfo
 import pickle
 from typing import Any, Final, cast
 from src.fsops.dirent import DirentOps
@@ -45,9 +46,9 @@ class Wolfs(DirentOps):
 	__metadb: Path
 
 	def __init__(self, node: RemoteNode,
-				 sourceDir: str, cacheDir: str, metadb: str = '', logFile: Path = Path(VFSOps._STDOUT),
+				 mount_info: MountFSDirectoryInfo, metadb: str = '', logFile: Path = Path(VFSOps._STDOUT),
 				 noatime: bool = True, maxCacheSizeMB: int = VFSOps._DEFAULT_CACHE_SIZE):
-		super().__init__(node, Path(sourceDir), Path(cacheDir), Path(logFile), maxCacheSizeMB, noatime)
+		super().__init__(node, mount_info, Path(logFile), maxCacheSizeMB, noatime)
 		self.__metadb = Path(metadb)
 		# todo / idea:
 		#  - we could use the XDG / freedesktop spec for a the file location of the meta file (~/.config/wolfs/metaFile.db)

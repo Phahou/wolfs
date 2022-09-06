@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-
+import dataclasses
 from typing import Union, Final
 from pathlib import Path
 import errno
@@ -11,16 +11,27 @@ log = logging.getLogger(__name__)
 
 Path_str = Union[str, Path]
 
+@dataclasses.dataclass
+class MountFSDirectoryInfo:
+	sourceDir: Path
+	cacheDir: Path
+	mountDir: Path
+
+	def __init__(self, sourceDir: Path_str, cacheDir: Path_str, mountDir: Path_str):
+		self.sourceDir = Path(sourceDir)
+		self.cacheDir = Path(cacheDir)
+		self.mountDir = Path(mountDir)
+
 class CachePath(Path):
 	@staticmethod
-	def toRootPath(sourceDir: Path, cacheDir: Path, path: Path_str) -> str:
+	def toRootPath(sourceDir: Path_str, cacheDir: Path_str, path: Path_str) -> str:
 		"""Get the Path without the cache or src prefix"""
 		_path: str = path if isinstance(path, str) else path.__str__()
 		root = _path.replace(sourceDir.__str__(), '').replace(cacheDir.__str__(), '')
 		return ('/' + root).replace('//', '/') if root else '/'
 
 	@staticmethod
-	def toDestPath(sourceDir: Path, destDir: Path, path: Path_str) -> Path:
+	def toDestPath(sourceDir: Path_str, destDir: Path_str, path: Path_str) -> Path:
 		root = CachePath.toRootPath(sourceDir, destDir, path)
 		result = f"{destDir.__str__()}{root}".replace('//', '/')
 		return Path(result)
@@ -35,8 +46,9 @@ class DiskBase:
 class PathTranslator:
 	sourceDir: Path
 	cacheDir: Path
+	mountDir: Path
 
-	def __init__(self, sourceDir: Path, cacheDir: Path):
+	def __init__(self, mount_info: MountFSDirectoryInfo):
 		def setattr_exit_on_failure(name: str, value: Path) -> None:
 			# fixed issue that CachePath fails on getting the parent manually
 			path = Path(os.path.abspath(value))
@@ -46,17 +58,31 @@ class PathTranslator:
 			else:
 				setattr(self, name, path)
 
-		setattr_exit_on_failure('sourceDir', sourceDir)
-		setattr_exit_on_failure('cacheDir', cacheDir)
+		setattr_exit_on_failure('sourceDir', mount_info.sourceDir)
+		setattr_exit_on_failure('cacheDir', mount_info.cacheDir)
+		setattr_exit_on_failure('mountDir', mount_info.mountDir)
 
 	def toRoot(self, path: Path_str) -> str:
-		return CachePath.toRootPath(self.sourceDir, self.cacheDir, path)
+		trimmed_src_cache_path = CachePath.toRootPath(self.sourceDir, self.cacheDir, path)
+#		if trimmed_src_cache_path == '/':
+#			return '/'
+		# use mountDir twice as it won't change it: replace() replaces all occourences
+		return CachePath.toRootPath(self.mountDir, self.mountDir, trimmed_src_cache_path)
+
+	def toMnt(self, path: Path_str) -> Path:
+		rpath = self.toRoot(path)
+		result = CachePath.toDestPath(self.mountDir, self.mountDir, rpath)
+		return result
 
 	def toSrc(self, path: Path_str) -> Path:
-		return CachePath.toDestPath(self.cacheDir, self.sourceDir, path)
+		rpath = self.toRoot(path)
+		result = CachePath.toDestPath(self.sourceDir, self.sourceDir, rpath)
+		return result
 
 	def toTmp(self, path: Path_str) -> Path:
-		return CachePath.toDestPath(self.sourceDir, self.cacheDir, path)
+		rpath = self.toRoot(path)
+		result = CachePath.toDestPath(self.cacheDir, self.cacheDir, rpath)
+		return result
 
 	def getParent(self, path: Path_str) -> str:
 		result: str = self.toRoot(path)
@@ -68,8 +94,8 @@ class PathTranslator:
 
 
 class InodeTranslator(PathTranslator, DiskBase):
-	def __init__(self, sourceDir: Path, cacheDir: Path):
-		super().__init__(sourceDir, cacheDir)
+	def __init__(self, mount_info: MountFSDirectoryInfo):
+		super().__init__(mount_info)
 
 		self.__last_ino: int = DiskBase.ROOT_INODE  # as the first ino is always 1 (ino 1 is for bad blocks but fuse doesn't act that way)
 		self.__freed_inos: set[int] = set()

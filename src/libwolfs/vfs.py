@@ -15,24 +15,26 @@ from collections import defaultdict
 from pathlib import Path
 import logging
 log = logging.getLogger(__name__)
-from src.libwolfs.translator import PathTranslator
+from src.libwolfs.translator import PathTranslator, MountFSDirectoryInfo
 from src.libwolfs.util import Col, CallStackAware, sizeof, formatByteSize
 from typing import Union, cast
 from src.libwolfs.fileInfo import FileInfo, DirInfo
 from src.libwolfs.errors import SOFTLINK_DISABLED_ERROR, HARDLINK_DIR_ILLEGAL_ERROR
+from src.libwolfs.disk import Disk
 
 
 ########################################################################################################################
 
 class VFS(PathTranslator, CallStackAware):
 	# I need to save all os operations in this so if os.lstat is called I can pretend I actually know the stuff
-	def __init__(self, sourceDir: Path, cacheDir: Path):
-		super().__init__(sourceDir, cacheDir)
+	def __init__(self, mount_info: MountFSDirectoryInfo):
+		super().__init__(mount_info)
 		#self.sourceDir: Final[Path] = Path(sourceDir)
 		#self.cacheDir: Final[Path] = Path(cacheDir)
 
 		# TODO: make btree out of this datatype with metafile stored somewhere
-		self.inode_path_map: dict[int, Union[FileInfo, DirInfo]] = dict()
+		root_info: DirInfo = DirInfo(mount_info.sourceDir, mount_info.cacheDir, DirInfo.getattr(mount_info.cacheDir), [])
+		self.inode_path_map: dict[int, Union[FileInfo, DirInfo]] = {Disk.ROOT_INODE: root_info}
 
 		# inode related: (used for memory management)
 		self._lookup_cnt: dict[int, int] = defaultdict(lambda: 0)  # reference counter for pyfuse3

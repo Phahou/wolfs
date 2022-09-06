@@ -13,6 +13,7 @@ embed = embed
 import random
 from src.libwolfs.disk import Disk
 from test.util import name_generator, nano_sleep, pseudo_file
+from src.libwolfs.translator import MountFSDirectoryInfo
 
 with open(__file__, 'rb') as fh:
 	TEST_DATA = fh.read()
@@ -28,7 +29,8 @@ CACHE_THRESHOLD = 0.7
 
 def prep_Disk(sourceDir, cacheDir, maxCacheSize=CACHE_SIZE, noatime=USE_NOATIME,
 			  cacheThreshold=CACHE_THRESHOLD):
-	return Disk(sourceDir=sourceDir, cacheDir=cacheDir, maxCacheSize=maxCacheSize, noatime=noatime,
+	mount_info = MountFSDirectoryInfo(sourceDir, cacheDir, cacheDir) # ignore mountpoint
+	return Disk(mount_info, maxCacheSize=maxCacheSize, noatime=noatime,
 				cacheThreshold=cacheThreshold)
 
 

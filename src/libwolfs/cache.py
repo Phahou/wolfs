@@ -2,7 +2,7 @@
 from sortedcontainers import SortedDict
 from typing import Final
 from pathlib import Path
-from src.libwolfs.translator import DiskBase, InodeTranslator
+from src.libwolfs.translator import InodeTranslator, MountFSDirectoryInfo
 from os import mkdir, rmdir, stat
 from src.libwolfs.util import Col, Path_str, formatByteSize
 
@@ -10,8 +10,9 @@ class Cache(InodeTranslator):
 	maxCacheSize: Final[int]
 	MIN_DIR_SIZE: Final[int]
 
-	def __init__(self, sourceDir: Path, cacheDir: Path, maxCacheSize: int, noatime: bool = True, cacheThreshold: float = 0.99):
-		super(Cache, self).__init__(sourceDir, cacheDir)
+	def __init__(self, mount_info: MountFSDirectoryInfo,
+			maxCacheSize: int, noatime: bool = True, cacheThreshold: float = 0.99):
+		super().__init__(mount_info)
 		# get OS dependant minimum directory size
 		mkdir('wolfs_tmp_directory')
 		self.MIN_DIR_SIZE = stat('wolfs_tmp_directory').st_size

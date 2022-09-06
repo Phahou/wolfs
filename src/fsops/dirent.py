@@ -14,11 +14,8 @@ from typing import Final, Union, cast
 from src.remote import RemoteNode  # type: ignore
 
 class DirentOps(LinkOps):
-
-	def __init__(self, *args, **kwargs):
-		super().__init__(*args, **kwargs)
-		# used to temporarily store directory entries while a readdir call is performed
-		self.freezed_dirents: dict[int: [int]] = dict()
+	# used to temporarily store directory entries while a readdir call is performed
+	freezed_dirents: dict[int: [int]] = dict()
 
 	async def mkdir(self, inode_p: int, name: str, mode: int, ctx: pyfuse3.RequestContext) -> pyfuse3.EntryAttributes:
 		# in cache:

@@ -4,13 +4,13 @@ import random
 import time
 import os
 import string
+from pathlib import Path
 MAX_PATH_SIZE: int = 4096
-MNT_PATH = "/mnt/wolfs"
 
 def coinflip() -> bool:
 	return True if random.choice([0, 1]) == 0 else False
 
-def rand_string(str_size: int) -> str:
+def rand_string(str_size: int = 16) -> str:
 	result = ''.join([random.choice(string.ascii_letters) for c in range(str_size)])
 	assert len(result) == str_size
 	assert len(result) < MAX_PATH_SIZE
