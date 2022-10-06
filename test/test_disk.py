@@ -146,7 +146,6 @@ class TestDisk:
 		os.remove(subdir_not_enough)
 		os.rmdir(subdir_not_enough_root)
 
-	@pytest.mark.skip
 	def test_copystat(self, tmpdir_factory):
 		tmpdir_source, _ = get_src_cache_directory_pair(tmpdir_factory)
 		# LATER: also copy xAttrs if there are any
@@ -234,7 +233,6 @@ class TestDisk:
 		# later when symbolic links are added
 		pass
 
-	@pytest.mark.skip
 	def test_path2Ino(self, tmpdir_factory):
 		tmpdir_source, tmpdir_cache = get_src_cache_directory_pair(tmpdir_factory)
 		disk = prep_Disk(tmpdir_source, tmpdir_cache, maxCacheSize=1)
@@ -242,17 +240,17 @@ class TestDisk:
 		rpath = disk.trans.toRoot(path)
 
 		# 1. case: path is unkown -> new ino
-		ino = disk[path]
+		ino = disk.path_to_ino(path)
 		assert disk._InodeTranslator__path_ino_map.get(rpath) == ino, f"path didnt save ino in internal dict"
 
 		# 2. case: path is known -> same ino (normal ops)
-		assert disk[path] == ino, f"If known the same ino should be returned"
+		assert disk.path_to_ino(path) == ino, f"If known the same ino should be returned"
 
 		# 3. case: reusing an ino (in rename ops)
 		del disk.trans[(ino, path.__str__())]
 		ino_rpath = disk._InodeTranslator__path_ino_map.get(rpath)
 		assert ino_rpath is None, f"{disk._InodeTranslator__path_ino_map} should contain {path} as it was inserted"
-		__freed_inos = getattr(disk.trans, '_' + disk.trans.__class__.__name__ + '__freed_inos')
+		__freed_inos = disk._InodeTranslator__freed_inos
 		assert ino in __freed_inos, f"{__freed_inos} should contain {ino} as it was deleted"
 
 		disk.trans.path_to_ino(path, reuse_ino=ino)
@@ -260,7 +258,7 @@ class TestDisk:
 
 		# 4. case: inodes grow only larger
 		path2: Path = Path(os.path.join(tmpdir_source, name_generator()))
-		ino2 = disk[path2]
+		ino2 = disk.path_to_ino(path2)
 		assert ino < ino2, f"The generator of inodes should only generate larger inos"
 
 	# 5. case: foreign translation update of inos

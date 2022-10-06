@@ -39,7 +39,7 @@ class LinkOps(XAttrsOps):
 
 	async def symlink(self, inode_p: int, name: str, target: str, ctx: RequestContext) -> EntryAttributes:
 		raise FUSEError(errno.ENOSYS)
-		parent_path: str = self.disk.trans.ino_to_path(inode_p)
+		parent_path: str = self.disk.trans.ino_to_rpath(inode_p)
 		assert not isinstance(parent_path, set), f"Something went horrendously wrong. A directory and has 2 hardlink paths: {parent_path}"
 		name: str = fsdecode(name)
 		symlink_path: str = parent_path + "/" + name

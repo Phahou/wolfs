@@ -93,7 +93,6 @@ class DirentOps(LinkOps):
 		#       -> update entries
 
 		inode_p = self[inode_p]
-
 		parent = self.vfs.cpath(inode_p)
 		cpath = os.path.join(parent, fsdecode(name))
 		inode = self.disk.trans.path_to_ino(cpath)

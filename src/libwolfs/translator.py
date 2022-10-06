@@ -112,7 +112,7 @@ class InodeTranslator(PathTranslator, DiskBase):
 		assert inode == self.path_to_ino(path), "Logic Error"
 
 		rpath = self.toRoot(path)
-		assert rpath in self.ino_to_path(inode), "Consistency Error"
+		assert rpath in self.ino_to_rpath(inode), "Consistency Error"
 
 		maybe_path: str | {str} = self.__ino_path_map[inode]
 		if isinstance(maybe_path, str):
@@ -177,7 +177,7 @@ class InodeTranslator(PathTranslator, DiskBase):
 
 		return ino
 
-	def ino_to_path(self, ino: int) -> str | set[str]:
+	def ino_to_rpath(self, ino: int) -> str | set[str]:
 		"""
 		Reverse lookup function of self.path_to_ino
 		:param ino:
@@ -199,14 +199,14 @@ class InodeTranslator(PathTranslator, DiskBase):
 		assert ino not in self.__freed_inos, "ino can't reference a freed ino"
 		assert ino in self.__ino_path_map, "ino has to have a path before creating a link!"
 
-		saved_path = self.ino_to_path(ino)
+		saved_path = self.ino_to_rpath(ino)
 		rpath = self.toRoot(some_path)
 
 		assert rpath not in self.__path_ino_map, "To be added rpath shouldn't be already saved!"
 		assert not self.toTmp(saved_path).is_dir() \
 			and not self.toSrc(saved_path).is_dir() \
 			and not Path(some_path).is_dir(), "hardlinks to directories are illegal"
-		known_paths = self.ino_to_path(ino)
+		known_paths = self.ino_to_rpath(ino)
 		if isinstance(known_paths, str):
 			pass
 		else:

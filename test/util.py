@@ -24,7 +24,9 @@ def name_generator():
 def nano_sleep():
 	time.sleep(random.randrange(1000) / 100_000)
 
-def pseudo_file(test_file: str, wanted_filesize: int = None) -> None:
+def pseudo_file(test_file: str | Path, wanted_filesize: int = None) -> None:
+	if isinstance(test_file, Path):
+		test_file = test_file.__str__()
 	if wanted_filesize is None:
 		wanted_filesize = os.stat(__file__).st_size
 	# create pseudo files of a particular file size:

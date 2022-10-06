@@ -115,7 +115,7 @@ class TestInodeTranslator:
 	def test_insertion_lookup_deletion_single_path(self) -> None:
 		ino = self.translator.path_to_ino(self.temp_f.name)
 		assert ino == self.translator.path_to_ino(self.temp_f.name)
-		assert self.translator.toRoot(self.temp_f.name) == self.translator.ino_to_path(ino)
+		assert self.translator.toRoot(self.temp_f.name) == self.translator.ino_to_rpath(ino)
 
 	def test_ino_generation(self) -> None:
 		t = NamedTemporaryFile(dir=self.src.name)
