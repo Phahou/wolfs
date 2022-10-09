@@ -128,7 +128,7 @@ class DirentOps(LinkOps):
 			pass
 			#if self.disk.isInBackend(inode):
 
-		self.journal.log_rmdir(inode, cpath)
+		self.journal.log_rmdir(inode_p, inode, cpath)
 		if self.vfs.inLookupCnt(inode):
 			self._forget_path(inode, cpath)
 

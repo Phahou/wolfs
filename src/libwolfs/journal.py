@@ -52,7 +52,7 @@ class LogEntry:
 	path_new: str = ""
 
 class Journal:
-	supported_ops: Final = [File_Ops.CREATE, File_Ops.WRITE, File_Ops.UNLINK, File_Ops.MKDIR]
+	supported_ops: Final = [File_Ops.CREATE, File_Ops.WRITE, File_Ops.UNLINK, File_Ops.MKDIR, File_Ops.RENAME]
 	__EMPTY_FDS = (0, 0)
 	__history: list[LogEntry] = []
 	__inode_dirty_map2: dict[int, int] = dict()
@@ -68,14 +68,9 @@ class Journal:
 		self.bytes_unwritten: int = 0
 		self.vfs: VFS = vfs
 		self.logFile = logFile
-		self.__history: list[LogEntry] = []
-		self.__inode_dirty_map2: dict[int, int] = dict()
-		self.__last_remote_path: str = ""
-		self.__last_fds: Write_Op = Journal.__EMPTY_FDS
 
 	# private api
 	# ===========
-
 	def __fsyncFile_with_remote(self, cache_file: str, write_ops: list[Write_Op]) -> None:
 		"""
 		Syncs `cache_file` with remote by applying `write_ops` to the corresponding remote file
@@ -180,6 +175,15 @@ class Journal:
 			self.__last_remote_path = ""
 			self.bytes_unwritten = 0
 
+		# TODO: What if a file was:
+		#  1. written to
+		#  2. deleted
+		#  3. created again
+		#  4. written to again
+		#  current approach would just delete the file and ignore the updates to the new file
+		#  => Lost Update! -> Disable "speedup" for know
+		compacted_history = self.__history
+		"""
 		unlink_entries = list(filter(lambda x: x.op == File_Ops.UNLINK, self.__history))
 		unlink_inos = list(map(lambda x: x.inode, unlink_entries))
 
@@ -194,6 +198,7 @@ class Journal:
 				except KeyError:
 					continue
 			compacted_history.append(item)
+		"""
 
 		len_history = len(compacted_history)
 		log.info(f'{Col.BG}Flushing complete Journal: {Col.BY}{len_history}{Col.BG} entries')
@@ -239,6 +244,8 @@ class Journal:
 
 	def log_create(self, inode: int, path: str, flags: int) -> None:
 		self.__markDirty(inode)
+		ino_p = self.disk.trans.path_to_ino(Path(path).parent.__str__())
+		self.__markDirty(ino_p)
 		e: LogEntry = LogEntry(File_Ops.CREATE, inode, self.disk.trans.toTmp(path).__str__())
 		e.flags = flags
 		self.__history.append(e)
@@ -271,28 +278,22 @@ class Journal:
 		self.__history.append(e)
 
 	def log_unlink(self, inode_p: int, inode: int, path: str) -> None:
-		def unlink_inode_in_parent_directory() -> None:
-			# inode from /tmp might not be present here anymore but file isn't deleted in src
-			info_p: DirInfo = cast(DirInfo, self.vfs.inode_path_map[inode_p])
-			assert isinstance(info_p, DirInfo), "Type mismatch"
-			assert inode in info_p.children, f"{inode} not in {info_p.children}, path {path}"
-			info_p.children.remove(inode)
-			self.disk.untrack(path)
-
-		unlink_inode_in_parent_directory()
+		"""Delete inode in inode_p"""
 		self.__markDirty(inode)
 		self.__markDirty(inode_p)
 		e: LogEntry = LogEntry(File_Ops.UNLINK, inode, path)
 
 		size: int = 0
-		# TODO:
-		#  	path has to be checked if it's in cache tracked
+		# TODO as this module already depends on disk:
+		#  - [ ] Write functions in disk that handle the disk storage size concerns of the source
+		#    - e.g. how much space is free?, add/remove space to know when there really is no space left
+		#           to at least mitigate/shrink the potential data loss
+		#  - [ ] path has to be checked if it's in cache tracked
 		self.src_bytes_avail += size
 		self.__history.append(e)
 
-	def log_rmdir(self, inode: int, path: str) -> None:
-		# same as unlink of a file as non-empty dirs would already have raised an error
-		self.log_unlink(inode, path)
+	def log_rmdir(self, inode_p: int, inode: int, path: str) -> None:
+		self.log_unlink(inode_p, inode, path)
 
 	def log_mkdir(self, inode_p: int, inode: int, path: str, mode: int) -> None:
 		self.__markDirty(inode)
