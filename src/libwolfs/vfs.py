@@ -62,6 +62,7 @@ class VFS(PathTranslator, CallStackAware):
 
 	def cpath(self, inode: int) -> Path:
 		"""Maps inodes to paths. Might raise `FUSEError(errno.ENOENT)`"""
+		log.debug("Deprecated use InodeTranslator.ino_toTmp() instead")
 		try:
 			val = self.inode_path_map[inode].cache
 		except KeyError:  # file likely doesnt exist. Logic error otherwise

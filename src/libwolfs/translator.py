@@ -110,7 +110,8 @@ class InodeTranslator(PathTranslator, DiskBase):
 		assert inode == self.path_to_ino(path), "Logic Error"
 
 		rpath = self.toRoot(path)
-		assert rpath in self.ino_to_rpath(inode), "Consistency Error"
+		if isinstance(self.__ino_path_map[inode], str):
+			assert rpath in self.ino_to_rpath(inode), "Consistency Error"
 
 		maybe_path: str | {str} = self.__ino_path_map[inode]
 		if isinstance(maybe_path, str):
@@ -124,7 +125,7 @@ class InodeTranslator(PathTranslator, DiskBase):
 
 			# return to original str type
 			if len(self.__ino_path_map[inode]) == 1:
-				self.__ino_path_map = self.__ino_path_map[inode].pop()
+				self.__ino_path_map[inode] = self.__ino_path_map[inode].pop()
 		del self.__path_ino_map[rpath]
 
 	def path_to_ino(self, some_path: Path_str, reuse_ino=0) -> int:
@@ -260,3 +261,9 @@ class InodeTranslator(PathTranslator, DiskBase):
 		# symlink have a new inode
 
 		# links can be a new inode, so we reuse code & adapt
+
+################################################################################
+# convinience functions (basically just shortcuts to commonly used operations)
+
+	def ino_toTmp(self, ino: int) -> Path:
+		return self.toTmp(self.ino_to_rpath(ino))

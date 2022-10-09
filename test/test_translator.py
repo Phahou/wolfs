@@ -156,7 +156,6 @@ class TestInodeTranslator:
 		rpath = trans.ino_to_rpath(ino)
 		assert ino == trans._InodeTranslator__path_ino_map[rpath]
 
-	@pytest.mark.skip
 	def test_hardlink_deletion_two_paths(self) -> None:
 		# shortcuts
 		trans = self.translator
@@ -170,7 +169,7 @@ class TestInodeTranslator:
 		rpath_1, rpath_2 = tuple(rpath_set)
 		assert isinstance(rpath_set, set)
 		assert isinstance(rpath_1, str) and isinstance(rpath_2, str)
-		assert {rpath_1, rpath_2} in trans._InodeTranslator__ino_path_map
+		assert {rpath_1, rpath_2} == trans._InodeTranslator__ino_path_map[ino]
 
 		# delete 1st path
 		del trans[(ino, rpath_1)]
@@ -231,3 +230,24 @@ class TestInodeTranslator:
 		with pytest.raises(AssertionError) as e:
 			self.translator.path_to_ino(t2.name, reuse_ino=ino2)
 			assert "reuse_ino can't be negative" in e.value
+
+################################################################################
+# convinience functions (basically just shortcuts to commonly used operations)
+	def test_ino_toTmp(self):
+		tmp_f = self.temp_f.name
+		trans = self.translator
+		ino = trans.path_to_ino(tmp_f)
+		assert trans.toRoot(tmp_f) == trans.ino_to_rpath(ino)
+		assert trans.toTmp(tmp_f) == trans.ino_toTmp(ino)
+
+	def test_ino_toTmp_hardlinks(self):
+		trans = self.translator
+		tmp_f = self.temp_f.name
+		tmp_f2 = NamedTemporaryFile(dir=self.src.name)
+		ino = trans.path_to_ino(tmp_f)
+		trans.add_hardlink(ino, tmp_f2.name)
+		assert trans.ino_toTmp(ino) in map(lambda x: trans.toTmp(x), trans.ino_to_rpath(ino, need_set=True))
+
+	@pytest.mark.skip
+	def test_ino_toTmp_softlinks(self):
+		pass
