@@ -96,22 +96,13 @@ def parse_args(args):
                         help='Size of the Cache in Megabytes')
     return parser.parse_args(args)
 
-
-def main():
-    options = parse_args(sys.argv[1:])
-    init_logging(options.debug)
-    src, cache, mount = options.source, options.cache, options.mountpoint
-    remote = RemoteNode(src, mount, 'ext4', None, None, None)
-    mount_info = MountFSDirectoryInfo(src, cache, mount)
-    operations = Operations(remote, mount_info, metadb=options.metadb, logFile=options.log,
-                            maxCacheSizeMB=options.size)
-
-    # log.debug('Mounting...')
+def mountfs(operations, options):
     fuse_options = set(pyfuse3.default_options)
     fuse_options.add('fsname=wolfs')
     if options.debug_fuse:
         fuse_options.add('debug')
-    pyfuse3.init(operations, options.mountpoint, fuse_options)
+    mountpoint = operations.disk.mountDir.absolute().__str__()
+    pyfuse3.init(operations, mountpoint, fuse_options)
 
     unmounted = False
     try:
@@ -125,11 +116,20 @@ def main():
     except:
         pyfuse3.close(unmount=False)
         raise
-
     if unmounted:
         return
-    # log.debug('Unmounting..')
+
     pyfuse3.close()
+
+def main():
+    options = parse_args(sys.argv[1:])
+    init_logging(options.debug)
+    src, cache, mount = options.source, options.cache, options.mountpoint
+    remote = RemoteNode(src, mount, 'ext4', None, None, None)
+    mount_info = MountFSDirectoryInfo(src, cache, mount)
+    operations = Operations(remote, mount_info, metadb=options.metadb, logFile=options.log,
+                            maxCacheSizeMB=options.size)
+    mountfs(operations, options)
 
 
 if __name__ == '__main__':

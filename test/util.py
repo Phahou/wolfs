@@ -35,3 +35,13 @@ def pseudo_file(test_file: str | Path, wanted_filesize: int = None) -> None:
 		f.seek((wanted_filesize * 1024) - 1)
 		f.write(b"\0")
 	assert os.stat(test_file).st_size == 1024 * wanted_filesize
+
+def rmtree(f: Path | str) -> None:
+	if isinstance(f, str):
+		f = Path(f)
+	if f.is_file():
+		f.unlink()
+	else:
+		for child in f.iterdir():
+			rmtree(child)
+		f.rmdir()
