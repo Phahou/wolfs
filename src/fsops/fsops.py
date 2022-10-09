@@ -153,6 +153,11 @@ class Wolfs(DirentOps):
 		while not transfer_q.empty() and not self.disk.isFull(use_threshold=True):
 			timestamp, (inode, file_size) = transfer_q.pop_nowait()
 			info: FileInfo = self.vfs.inode_path_map[inode]
+			info_rpath = self.disk.ino_to_rpath(info.entry.st_ino)
+			info_src = self.disk.toSrc(info_rpath)
+			info_cache = self.disk.toTmp(info_src)
+			assert info.src == info_src, "Consistency Error"
+			assert info.cache == info_cache, "Consistency Error"
 			path, dst = cast(Path, info.src), info.cache
 
 			# skip symbolic links for now

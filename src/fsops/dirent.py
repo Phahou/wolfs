@@ -12,6 +12,7 @@ from src.libwolfs.util import Col
 from src.libwolfs.fileInfo import FileInfo, DirInfo
 from typing import Final, Union, cast
 from src.remote import RemoteNode  # type: ignore
+from pathlib import Path
 
 class DirentOps(LinkOps):
 	# used to temporarily store directory entries while a readdir call is performed
@@ -150,8 +151,8 @@ class DirentOps(LinkOps):
 				for child_inode in childs:
 					try:
 						info: Union[FileInfo, DirInfo] = self.vfs.inode_path_map[child_inode]
-						# __Very strange__ that `info.entry.st_ino` changes between calls although we dont write to it ?
-						# info.entry.st_ino = child_inode
+						cache_path: Path = self.disk.toTmp(self.disk.ino_to_rpath(child_inode))
+						assert cache_path == info.cache, "Consistency Error"
 						entries.append((child_inode, info.cache.name, info.entry))  # type: ignore
 					except KeyError:
 						# TODO: ignore missing symlinks for now

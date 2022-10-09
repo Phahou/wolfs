@@ -138,6 +138,7 @@ class Journal:
 		def __rename(src_path: Path, logEntry: LogEntry) -> None:
 			path_new: Path = self.disk.trans.toSrc(getattr(logEntry, 'path_new'))
 			os.rename(src_path, path_new)
+			# delete-able as only written to
 			self.vfs.inode_path_map[logEntry.inode].src = path_new
 
 		switcher = {
