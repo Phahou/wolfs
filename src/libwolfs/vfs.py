@@ -75,7 +75,11 @@ class VFS(PathTranslator, CallStackAware):
 	# inode <-> path funcs
 	# ====================
 
-	def add_Child(self, inode_p: int, inode: int, path: str, entry: pyfuse3.EntryAttributes) -> None:
+	def add_Child(self,
+		inode_p: int,
+		inode: int,
+		path: str,
+		entry: pyfuse3.EntryAttributes) -> None:
 		"""Also adds file to parent inode `inode_p`"""
 		assert inode_p != inode, f"{self} inode_p({Col(inode_p)}) can't be inode({Col(inode)})"
 		assert inode == entry.st_ino, 'entry ino must be the same as lookup ino'
@@ -86,7 +90,11 @@ class VFS(PathTranslator, CallStackAware):
 		if inode not in info_p.children:
 			info_p.children.append(inode)
 
-	def _add_Directory(self, inode_p: int, wolfs_inode: int, inode_path: str, entry: pyfuse3.EntryAttributes) -> DirInfo:
+	def _add_Directory(self,
+		inode_p: int,
+		wolfs_inode: int,
+		inode_path: str,
+		entry: pyfuse3.EntryAttributes) -> DirInfo:
 		src_p, cache_p = self.toSrc(inode_path), self.toTmp(inode_path)
 		directory = DirInfo(src_p, cache_p, entry, [])
 
@@ -109,7 +117,21 @@ class VFS(PathTranslator, CallStackAware):
 
 		return directory
 
-	def add_path(self, inode: int, path: str, file_attrs: pyfuse3.EntryAttributes = pyfuse3.EntryAttributes()) -> None:
+	def add_path(self,
+		inode: int,
+		path: str,
+		file_attrs: pyfuse3.EntryAttributes) -> None:
+		"""
+		Add associated (ino, path)-metadata and increase their lookup count
+
+		:param inode: inode to be added and increased
+		:param path: path associated with inode
+		:param file_attrs: metadata of inode
+		"""
+		# TODO:
+		#  -> Rewrite so that we only serve file Attributes and no paths anymore as
+		#     translator is better suited for this
+		#     => this rework should simplify most of this class
 		assert inode == file_attrs.st_ino, f'inode and file_attrs.st_ino have to be the same as file_attrs.st_ino are for lookup'
 		self._lookup_cnt[inode] += 1
 		src_p, cache_p = self.toSrc(path), self.toTmp(path)
@@ -139,7 +161,12 @@ class VFS(PathTranslator, CallStackAware):
 	# attr methods
 	# ============
 
-	async def setattr(self, inode: int, attr: pyfuse3.EntryAttributes, fields: pyfuse3.SetattrFields, fh: int, ctx: pyfuse3.RequestContext) -> pyfuse3.EntryAttributes:
+	async def setattr(self,
+			inode: int,
+			attr: pyfuse3.EntryAttributes,
+			fields: pyfuse3.SetattrFields,
+			fh: int,
+			ctx: pyfuse3.RequestContext) -> pyfuse3.EntryAttributes:
 		if fh is None:
 			path_or_fh = self.cpath(inode)
 		else:
