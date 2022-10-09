@@ -42,7 +42,7 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 		return inode if inode != FUSE_ROOT_INODE else DiskBase.ROOT_INODE
 
 	def __init__(self, node: RemoteNode, mount_info: MountFSDirectoryInfo,
-				 logFile: Path, maxCacheSizeMB: int = _DEFAULT_CACHE_SIZE, noatime: bool = True):
+				 logFile: Path = "", maxCacheSizeMB: int = _DEFAULT_CACHE_SIZE, noatime: bool = True):
 		super().__init__()
 		self.disk = Disk(mount_info, maxCacheSizeMB, noatime)
 		self.vfs = VFS(mount_info)
@@ -291,7 +291,7 @@ class BasicOps(VFSOps):
 		inode, inode_old = self[inode], inode
 		log.debug(f'{Col(inode)}, flags: {Col(flags)}; old_ino: {Col(inode_old)}')
 
-		if self.vfs.already_open(inode):
+		if inode in self.vfs._inode_fd_map:
 			fd: int = self.vfs._inode_fd_map[inode]
 			self.vfs._fd_open_count[fd] += 1
 			# log.info(self + f" (fd, inode): ({fd}, {Col.inode(inode)})")
@@ -354,6 +354,13 @@ class BasicOps(VFSOps):
 			inode = self.disk.path_to_ino(path)
 		except OSError as exc:
 			raise FUSEError(exc.errno)
+
+		# inode from /tmp might not be present here anymore but file isn't deleted in src
+		info_p: DirInfo = cast(DirInfo, self.vfs.inode_path_map[inode_p])
+		assert isinstance(info_p, DirInfo), "Type mismatch"
+		assert inode in info_p.children, f"{inode} not in {info_p.children}, path {path}"
+		info_p.children.remove(inode)
+		self.disk.untrack(path)
 
 		self.journal.log_unlink(inode_p, inode, path)
 		if self.vfs.inLookupCnt(inode):

@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 from src.libwolfs.translator import PathTranslator, MountFSDirectoryInfo
 from src.libwolfs.util import Col, CallStackAware, sizeof, formatByteSize
 from typing import Union, cast
+from src.libwolfs.util import Path_str
 from src.libwolfs.fileInfo import FileInfo, DirInfo
 from src.libwolfs.errors import SOFTLINK_DISABLED_ERROR, HARDLINK_DIR_ILLEGAL_ERROR
 from src.libwolfs.disk import Disk
@@ -29,8 +30,6 @@ class VFS(PathTranslator, CallStackAware):
 	# I need to save all os operations in this so if os.lstat is called I can pretend I actually know the stuff
 	def __init__(self, mount_info: MountFSDirectoryInfo):
 		super().__init__(mount_info)
-		#self.sourceDir: Final[Path] = Path(sourceDir)
-		#self.cacheDir: Final[Path] = Path(cacheDir)
 
 		# TODO: make btree out of this datatype with metafile stored somewhere
 		root_info: DirInfo = DirInfo(mount_info.sourceDir, mount_info.cacheDir, DirInfo.getattr(mount_info.cacheDir), [])
@@ -44,16 +43,13 @@ class VFS(PathTranslator, CallStackAware):
 		self._fd_inode_map: dict[int, int] = dict()  # maps file descriptors to inodes
 		self._fd_open_count: dict[int, int] = dict()  # reference counter if inode is still open (being used)
 
-	def already_open(self, inode: int) -> bool:
-		return inode in self._inode_fd_map
-
 	# "properties"
 	def del_inode(self, inode: int) -> None:
 		# todo: needs to hold information that remote has to be deleted too
 		# TODO: also change info of parent inode
 		del self.inode_path_map[inode]
 
-	def set_inode_path(self, inode: int, path: Union[str, Path]) -> None:
+	def set_inode_path(self, inode: int, path: Path_str) -> None:
 		self.inode_path_map[inode].src = self.toSrc(path)
 		self.inode_path_map[inode].cache = self.toTmp(path)
 
@@ -155,13 +151,13 @@ class VFS(PathTranslator, CallStackAware):
 		return await new_attr
 
 	async def getattr(self, inode: int, ctx: pyfuse3.RequestContext = None) -> pyfuse3.EntryAttributes:
-		if self.already_open(inode):  # if isOpened(inode):
+		if inode in self._inode_fd_map:  # if isOpened(inode):
 			return FileInfo.getattr(fd=self._inode_fd_map[inode])
 		else:
 			return FileInfo.getattr(path=self.cpath(inode))
 
-	# pyfuse3 specific ?
-	# ==================
+	# pyfuse3 specific
+	# ================
 
 	def inLookupCnt(self, inode: int) -> bool:
 		return inode in self._lookup_cnt

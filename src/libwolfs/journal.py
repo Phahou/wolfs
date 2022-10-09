@@ -28,8 +28,7 @@ from src.libwolfs.util import Col, __functionName__
 from IPython import embed
 
 embed = embed
-from typing import Final, cast
-import shutil
+from typing import Final
 
 Write_Op = tuple[int, int]
 INVALID_VALUE: Final[int] = -1
@@ -41,7 +40,6 @@ class File_Ops(Flag):
 	UNLINK = auto()
 	RENAME = auto()
 	MKDIR = auto()
-	FLUSH = auto()
 
 @dataclasses.dataclass
 class LogEntry:
@@ -56,6 +54,10 @@ class LogEntry:
 class Journal:
 	supported_ops: Final = [File_Ops.CREATE, File_Ops.WRITE, File_Ops.UNLINK, File_Ops.MKDIR]
 	__EMPTY_FDS = (0, 0)
+	__history: list[LogEntry] = []
+	__inode_dirty_map2: dict[int, int] = dict()
+	__last_remote_path: str = ""
+	__last_fds: Write_Op = __EMPTY_FDS
 
 	def __init__(self, disk: Disk, vfs: VFS, logFile: Path):
 		self.disk: Disk = disk
@@ -170,8 +172,13 @@ class Journal:
 	# ==========
 
 	def flushCompleteJournal(self) -> None:
-		# empty out unneeded ops if inodes was deleted unlinked entries
-		# Doesn't sort out rewrites of files under a different inode, read / writes will be ok though
+		def clearBuffers():
+			# clean internal buffers
+			self.__history.clear()
+			self.__inode_dirty_map2.clear()
+			self.__last_fds = Journal.__EMPTY_FDS
+			self.__last_remote_path = ""
+			self.bytes_unwritten = 0
 
 		unlink_entries = list(filter(lambda x: x.op == File_Ops.UNLINK, self.__history))
 		unlink_inos = list(map(lambda x: x.inode, unlink_entries))
@@ -200,12 +207,7 @@ class Journal:
 				print(f'Processed {i} items')
 
 		log.info(f'{Col.BW}Finished flushing complete Journal')
-		# clean internal buffers
-		self.__history = []
-		self.__inode_dirty_map2 = {}
-		self.__last_fds = Journal.__EMPTY_FDS
-		self.__last_remote_path = ""
-		self.bytes_unwritten = 0
+		clearBuffers()
 
 		# TODO: might be a good place to rearrange some data that was accessed longest ago to make some room for buffers
 		#	aka let some buffer

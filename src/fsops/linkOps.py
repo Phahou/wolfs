@@ -49,7 +49,8 @@ class LinkOps(XAttrsOps):
 			os.chown(symlink_path, ctx.uid, ctx.gid, follow_symlinks=False)
 		except OSError as exc:
 			raise FUSEError(exc.errno)
-		self.vfs.add_Child(inode_p, ino, symlink_path, self.getattr(ino))
+		entry = self.getattr(ino)
+		self.vfs.add_Child(inode_p, ino, symlink_path, entry)
 
 		# for softlinks
 
@@ -59,7 +60,7 @@ class LinkOps(XAttrsOps):
 		#stat = os.lstat(path)
 		ino = self.disk.trans.path_to_ino(path)
 		lkup = self.vfs._lookup_cnt[ino]
-		self.vfs.add_path(ino, path)
+		self.vfs.add_path(ino, path, entry)
 
 		result = await self.getattr(stat.st_ino)
 

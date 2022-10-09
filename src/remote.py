@@ -87,4 +87,4 @@ class RemoteNode:
 		"""
 		if not self.isOnline():
 			await self.wakeup()
-			mount(self.remoteSource, self.mountPoint, fs=self.remoteFS, options=self.mountOpts)
+			mount(self.remoteSource.__str__(), self.mountPoint.__str__(), fs=self.remoteFS, options=self.mountOpts)

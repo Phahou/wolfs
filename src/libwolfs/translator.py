@@ -7,9 +7,7 @@ import os
 import logging
 from sys import exit
 log = logging.getLogger(__name__)
-
-
-Path_str = Union[str, Path]
+from src.libwolfs.util import Path_str
 
 @dataclasses.dataclass
 class MountFSDirectoryInfo:
