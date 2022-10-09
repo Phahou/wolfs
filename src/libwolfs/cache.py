@@ -13,10 +13,16 @@ class Cache(InodeTranslator):
 	def __init__(self, mount_info: MountFSDirectoryInfo,
 			maxCacheSize: int, noatime: bool = True, cacheThreshold: float = 0.99):
 		super().__init__(mount_info)
+
+		def get_min_dir_size():
+			tmpdir: Path = self.cacheDir / 'wolfs_tmp_directory'
+			mkdir(tmpdir)
+			min_dir_size = stat(tmpdir).st_size
+			rmdir(tmpdir)
+			return min_dir_size
+
 		# get OS dependant minimum directory size
-		mkdir('wolfs_tmp_directory')
-		self.MIN_DIR_SIZE = stat('wolfs_tmp_directory').st_size
-		rmdir('wolfs_tmp_directory')
+		self.MIN_DIR_SIZE = get_min_dir_size()
 
 		self._current_CacheSize: int = 0
 		self._cacheThreshold: float = cacheThreshold

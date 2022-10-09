@@ -463,7 +463,9 @@ class NodeOps(BasicOps):
 		if not self.journal.isCompletelyClean():
 			log.info(self.disk.getSummary())
 		self.journal.flushCompleteJournal()
-		return stat_
+
+		# modify size, used, avail
+		return self.disk.statvfs(stat_)
 
 	async def mknod(self, inode_p: int, name: str, mode: int, rdev: int,
 					ctx: pyfuse3.RequestContext) -> pyfuse3.EntryAttributes:

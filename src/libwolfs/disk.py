@@ -16,11 +16,12 @@ import shutil
 import errno
 import os
 import logging
-from pyfuse3 import FUSEError
+from pyfuse3 import FUSEError, StatvfsData
 from src.libwolfs.util import Col, Path_str
 from src.libwolfs.errors import NotEnoughSpaceError, SOFTLINK_DISABLED_ERROR
 from typing import Union
 from src.libwolfs.cache import Cache
+from math import floor, ceil
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +61,18 @@ class Disk(Cache):
 
 		Disk.copystat(src, dst)
 		return added_size, added_folders
+
+	def statvfs(self, stat: StatvfsData) -> StatvfsData:
+		# block related
+		stat.f_blocks = floor(self.maxCacheSize // stat.f_frsize)
+
+		assert self.maxCacheSize >= self._current_CacheSize
+		stat.f_bfree = floor((self.maxCacheSize // stat.f_bsize)) - ceil(self._current_CacheSize // stat.f_bsize)
+		stat.f_bavail = floor((self.maxCacheSize - self._current_CacheSize) // stat.f_bsize)
+
+		# inode related (translator)
+		assert stat.f_blocks * stat.f_frsize == self.maxCacheSize
+		return stat
 
 	# Size related
 	def canStore(self, size_or_path: Path) -> bool:
