@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import dataclasses
-from typing import Union, Final
+from typing import Final
 from pathlib import Path
 import errno
 import os
@@ -175,41 +175,71 @@ class InodeTranslator(PathTranslator, DiskBase):
 
 		return ino
 
-	def ino_to_rpath(self, ino: int) -> str | set[str]:
+	def ino_to_rpath(self, ino: int, need_set: bool = False) -> str | set[str]:
 		"""
 		Reverse lookup function of self.path_to_ino
-		:param ino:
-		:return: corresponding root path of ino or set of corresponding paths
+		:param need_set: if dealing with hardlinks e.g. renaming a file set this to True, as
+			you have to decide for yourself which path shall be renamed of them
+		:param ino: inode to be lookuped up
+		:return:
+			if ino has no hardlinks:
+		    	corresponding root path of ino
+			if ino has hardlinks and need_set == False:
+				some root path corresponding to ino
+			if ino has hardlinks and need_set == True:
+			     set of root paths mapping ino
 		"""
-		path: str = self.__ino_path_map.get(ino)
+		path: str | set[str] = self.__ino_path_map.get(ino)
+		if isinstance(path, set):
+			if need_set:
+				return path
+			tmp_p = path.pop()
+			path.add(tmp_p)
+			path = tmp_p
+
 		assert path is not None, "Logic Error"
 		return path
 
-	def add_hardlink(self, ino: int, some_path: Path_str) -> None:
+	def add_hardlink(self, ino: int, hardlink_target: Path_str) -> None:
 		"""
-		add root path of `some_path` to ino entry
-		Basically add `some_path` to internal ino <-> path mapping
+		add root path of `some_path` to ino entry resolving them to the same ino
+
 		:param ino: inode with already existent path
-		:param some_path: path to add to ino entry
+		:param hardlink_target: path to add to ino entry
 		"""
-		raise NotImplementedError()
-		assert ino > 0, "inos cant be negative"
-		assert ino not in self.__freed_inos, "ino can't reference a freed ino"
-		assert ino in self.__ino_path_map, "ino has to have a path before creating a link!"
+		def health_checks():
+			# check before inserting in set as pop() might always return first(validated) inserted item
+			assert Path(hardlink_target) in \
+				{self.toTmp(hardlink_target), self.toMnt(hardlink_target), self.toSrc(hardlink_target)}, \
+				"hardlink_target must have Mnt|Src|Tmp prefix!"
 
-		saved_path = self.ino_to_rpath(ino)
-		rpath = self.toRoot(some_path)
+			assert not Path(hardlink_target).is_dir() \
+				and not self.toTmp(hardlink_target).is_dir() \
+				and not self.toSrc(hardlink_target).is_dir() \
+				and not self.toMnt(hardlink_target).is_dir(), "hardlinks to directories are illegal"
 
-		assert rpath not in self.__path_ino_map, "To be added rpath shouldn't be already saved!"
-		assert not self.toTmp(saved_path).is_dir() \
-			and not self.toSrc(saved_path).is_dir() \
-			and not Path(some_path).is_dir(), "hardlinks to directories are illegal"
-		known_paths = self.ino_to_rpath(ino)
-		if isinstance(known_paths, str):
-			pass
+			assert ino > 0, "inos cant be negative"
+			assert ino not in self.__freed_inos, "ino can't reference a freed ino"
+			assert ino in self.__ino_path_map, "ino has to have a path before creating a link!"
+		health_checks()
+
+		rpath = self.toRoot(hardlink_target)
+		assert rpath not in self.__path_ino_map, "To be added rpath mustn't be already saved!"
+
+		original_path = self.ino_to_rpath(ino)
+
+		# check if original_path too if it shall be converted to a hardlink
+		if isinstance(original_path, str):
+			assert not self.toTmp(original_path).is_dir() \
+				and not self.toSrc(original_path).is_dir() \
+				and not self.toMnt(original_path).is_dir(), "hardlinks to directories are illegal"
+
+		if isinstance(original_path, str):
+			original_path = {original_path, rpath}
 		else:
-			known_paths.add(rpath)
-		self.__ino_path_map[ino] = known_paths
+			original_path.add(rpath)
+		self.__ino_path_map[ino] = original_path
+		self.__path_ino_map[rpath] = ino
 
 	def add_softlink(self, link_path: Path_str, target: Path_str) -> int:
 		"""
@@ -218,6 +248,9 @@ class InodeTranslator(PathTranslator, DiskBase):
 		:param link_path: new softlink
 		:param target: to be referenced path
 		"""
+		# TODO: figure out how symbolic links are referenced in pyfuse
+		#       doesnt make sense to write sth here when I dont know how I shall
+		#       reference it
 		raise NotImplementedError()
 		ino: int = self.path_to_ino(link_path)
 		return ino

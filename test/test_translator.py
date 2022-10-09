@@ -29,6 +29,7 @@ class TestPathTranslator:
 		del self.translator
 		del self.temp_f
 
+################################################################################
 	def test_toRoot_initDirs(self) -> None:
 		assert "/" == self.translator.toRoot(self.mount.name)
 		assert "/" == self.translator.toRoot(self.src.name)
@@ -95,6 +96,7 @@ class TestInodeTranslator:
 		del self.translator
 		del self.temp_f
 
+################################################################################
 	def test_insertion_deletion_single_path(self) -> int:
 		ino = self.translator.path_to_ino(self.temp_f.name)
 		path_ino_map = self.translator._InodeTranslator__path_ino_map
@@ -135,16 +137,71 @@ class TestInodeTranslator:
 		t2 = NamedTemporaryFile(dir=self.src.name)
 		assert self.translator.path_to_ino(t2.name, reuse_ino=ino) == ino
 
-	@pytest.mark.skip
-	def test_insertion_same_ino_different_paths(self) -> None:
-		ino = self.translator.path_to_ino(self.temp_f.name)
-		t2 = NamedTemporaryFile(dir=self.src.name)
-		ino2 = self.translator.path_to_ino(t2.name, reuse_ino=ino)
+	def test_hardlink_insertion_two_paths(self) -> None:
+		# boilerplate setup: insert 1st path
+		trans = self.translator
+		ino = trans.path_to_ino(self.temp_f.name)
+		assert isinstance(trans._InodeTranslator__ino_path_map[ino], str)
+		assert trans.ino_to_rpath(ino) == trans._InodeTranslator__ino_path_map[ino]
+
+		# insert 2nd path via hardlink
+		tmp_f2 = NamedTemporaryFile(dir=self.src.name)
+		trans.add_hardlink(ino, tmp_f2.name)
+		ino2 = trans.path_to_ino(tmp_f2.name)
+		assert trans.path_to_ino(self.temp_f.name) == ino
 		assert ino == ino2
+		assert isinstance(trans._InodeTranslator__ino_path_map[ino], set)
+
+		# check for consitency
+		rpath = trans.ino_to_rpath(ino)
+		assert ino == trans._InodeTranslator__path_ino_map[rpath]
 
 	@pytest.mark.skip
-	def test_deletion_same_ino_different_paths(self) -> None:
-		# softlinks need to be enabled
+	def test_hardlink_deletion_two_paths(self) -> None:
+		# shortcuts
+		trans = self.translator
+
+		# fill up data structure
+		self.test_hardlink_insertion_two_paths()
+
+		# get inos & paths
+		ino = trans.path_to_ino(self.temp_f.name)
+		rpath_set: set = trans.ino_to_rpath(ino, need_set=True)
+		rpath_1, rpath_2 = tuple(rpath_set)
+		assert isinstance(rpath_set, set)
+		assert isinstance(rpath_1, str) and isinstance(rpath_2, str)
+		assert {rpath_1, rpath_2} in trans._InodeTranslator__ino_path_map
+
+		# delete 1st path
+		del trans[(ino, rpath_1)]
+
+		# check rpath_1 is not anymore in internal mappings but rpath_2 is as is ino
+		assert rpath_2 in trans._InodeTranslator__path_ino_map
+		assert rpath_1 not in trans._InodeTranslator__path_ino_map
+		assert ino in trans._InodeTranslator__ino_path_map
+
+		# consistency check
+		rpath_set_without_rpath_1 = trans.ino_to_rpath(ino, need_set=True)
+		assert rpath_set_without_rpath_1 == rpath_2
+		assert trans.path_to_ino(rpath_2) == ino
+		assert trans.ino_to_rpath(ino) == rpath_2
+
+		del trans[(ino, rpath_2)]
+		# check ino and rpath_2 are not anymore in internal mappings
+		assert rpath_2 not in trans._InodeTranslator__path_ino_map
+		assert ino not in trans._InodeTranslator__ino_path_map
+		assert ino in trans._InodeTranslator__freed_inos
+
+	@pytest.mark.skip
+	def test_softlink_insertion(self):
+		pass
+
+	@pytest.mark.skip
+	def test_softlink_deletion(self):
+		pass
+
+	@pytest.mark.skip
+	def test_hardlink_to_softlink(self):
 		pass
 
 	def test_execption_on_too_large_ino(self) -> None:
