@@ -229,6 +229,7 @@ class TestDisk:
 		for d in reversed(added_folders):  # skip root dir
 			d.rmdir()
 
+	@pytest.mark.skip
 	def test_getSize(self):
 		# later when symbolic links are added
 		pass
