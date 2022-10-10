@@ -104,6 +104,9 @@ class InodeTranslator(PathTranslator, DiskBase):
 		self.__path_ino_map["/"] = self.__last_ino
 		self.__ino_path_map[self.__last_ino] = "/"
 
+	def ino_exists(self, inode: int) -> bool:
+		return self.__ino_path_map.get(inode, None) is not None
+
 	def __delitem__(self, inode__path: tuple[int, str]) -> None:
 		"""delete translation inode"""
 		inode, path = inode__path

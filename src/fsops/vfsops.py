@@ -269,8 +269,28 @@ class BasicOps(VFSOps):
 					  fields: pyfuse3.SetattrFields,
 					  fh: int,
 					  ctx: pyfuse3.RequestContext) -> pyfuse3.EntryAttributes:
+		def get_deleted_Attrs() -> pyfuse3.EntryAttributes:
+			entry = pyfuse3.EntryAttributes()
+			deletion_attr = {
+				'st_mode': 0, 'st_nlink': 0, 'st_uid': 0, 'st_gid': 0,
+				'st_rdev': 0, 'st_size': 0, 'st_atime_ns': 0, 'st_mtime_ns': 0,
+				'st_ctime_ns': 0}
+			for keys, values in deletion_attr.items():
+				setattr(entry, keys, values)
+			entry.generation = 0
+			entry.entry_timeout = float('inf')
+			entry.attr_timeout = float('inf')
+			return entry
+
 		if fh is None:
-			path_or_fh = self.disk.ino_toTmp(inode)
+			if self.disk.ino_exists(inode):
+				path_or_fh = self.disk.ino_toTmp(inode)
+			else:
+				# setattr calls an already deleted ino to signal to pyfuse3 what has changed.
+				# As we deleted the file in cache already we can't use stat() or FileInfo.getattr.
+				# So we have to generate our own change here
+				entry = get_deleted_Attrs()
+				return entry
 		else:
 			path_or_fh = fh
 		FileInfo.setattr(attr, fields, path_or_fh, ctx)
