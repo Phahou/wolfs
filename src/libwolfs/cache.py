@@ -32,7 +32,7 @@ class Cache(InodeTranslator):
 
 		self.in_cache: SortedDict[int, (str, int)] = SortedDict()
 		self.path_timestamp: dict[str, int] = dict()
-		self._cached_inos: dict[int, bool] = dict()
+		self._cached_inos: set[int] = set()
 
 		# compatibility to old code use remove later
 		self.trans = self

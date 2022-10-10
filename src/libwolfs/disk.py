@@ -131,7 +131,7 @@ class Disk(Cache):
 
 		# update bookkeeping
 		self.path_timestamp[src_path] = timestamp
-		self._cached_inos[ino] = True
+		self._cached_inos.add(ino)
 		self._current_CacheSize += size
 		return ino
 
@@ -166,7 +166,7 @@ class Disk(Cache):
 				del in_cache[timestamp]
 
 			del self.path_timestamp[src_path]
-			del self._cached_inos[self.trans.path_to_ino(src_path)]
+			self._cached_inos.remove(self.trans.path_to_ino(src_path))
 			self._current_CacheSize -= size
 		except KeyError as e:
 			log.error("KeyError Exception that shouldnt have happened happened")
