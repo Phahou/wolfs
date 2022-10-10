@@ -37,10 +37,6 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 	_DEFAULT_CACHE_SIZE: Final[int] = 512
 	_STDOUT: Final[str] = "/dev/stdout"
 
-	def __getitem__(self, inode: int) -> int:
-		"""translate pyfuse3.ROOT_INODE into our ROOT_INODE"""
-		return inode if inode != FUSE_ROOT_INODE else DiskBase.ROOT_INODE
-
 	def __init__(self, node: RemoteNode, mount_info: MountFSDirectoryInfo,
 				 logFile: Path = "", maxCacheSizeMB: int = _DEFAULT_CACHE_SIZE, noatime: bool = True):
 		super().__init__()
@@ -153,7 +149,6 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 		join, ino2Path = os.path.join, self.disk.ino_toTmp
 		inoPathMap: dict[int, FileInfo] = self.vfs.inode_path_map
 
-		inode_p_old, inode_p_new = self[inode_p_old], self[inode_p_new]
 		path_old, path_new = join(ino2Path(inode_p_old), fsdecode(name_old)), join(ino2Path(inode_p_new),
 																				   fsdecode(name_new))
 		ino_old = self.disk.path_to_ino(path_old, reuse_ino=inode_p_old)
@@ -219,26 +214,18 @@ class BasicOps(VFSOps):
 		translated_ino_list: list[tuple[int, int]] = []
 		sorted_inodes: list[tuple[int, int]] = sorted(inode_list)
 		for (ino, nlookup) in sorted_inodes:
-			translated_ino_list.append((self[ino], nlookup))
+			translated_ino_list.append((ino, nlookup))
 		log.debug(f' for untranslated: {Col(sorted_inodes)} -> {Col(translated_ino_list)} (translated)')
 		await self.vfs.forget(translated_ino_list)
 
 	def _forget_path(self, inode: int, path: str) -> None:
 		# gets called internally so no translation
 		log.debug(f'{Col(path)} as ino {Col(inode)}')
-		val = self.disk.ino_toTmp(inode)
-		if isinstance(val, set):
-			val.remove(path)
-			if len(val) == 1:
-				self.vfs.set_inode_path(inode, next(iter(val)))
-		else:
-			self.vfs.del_inode(inode)
-			del self.disk.trans[(inode, path)]
+		self.vfs.del_inode(inode)
 
 	# done?
 	async def lookup(self, inode_p: int, name: str, ctx: pyfuse3.RequestContext = None) -> pyfuse3.EntryAttributes:
 		name = fsdecode(name)
-		inode_p = self[inode_p]
 
 		# ignore some lookups when debugging
 		if not re.findall(r'^.?(folder|cover|convert|tumbler|hidden|jpg|png|jpeg|file|svn)', name,
@@ -288,9 +275,9 @@ class BasicOps(VFSOps):
 			path_or_fh = fh
 		FileInfo.setattr(attr, fields, path_or_fh, ctx)
 		# todo check if attr now is attr after self.getattr
-		new_attr = self.getattr(inode)
+		new_attr = await self.getattr(inode)
 		assert attr != new_attr, "attr are equal ?"
-		return await new_attr
+		return new_attr
 
 	async def __getattr(self, inode: int, ctx: pyfuse3.RequestContext = None) -> pyfuse3.EntryAttributes:
 		if inode in self.vfs._inode_fd_map:  # if isOpened(inode):
@@ -299,7 +286,6 @@ class BasicOps(VFSOps):
 			return FileInfo.getattr(path=self.disk.ino_toTmp(inode))
 
 	async def getattr(self, inode: int, ctx: pyfuse3.RequestContext = None) -> pyfuse3.EntryAttributes:
-		inode = self[inode]
 		entry = await self.__getattr(inode, ctx)
 		path = self.disk.ino_toTmp(inode)
 		entry.st_ino = self.disk.trans.path_to_ino(path)
@@ -309,8 +295,7 @@ class BasicOps(VFSOps):
 	# ==============================================
 
 	async def open(self, inode: int, flags: int, ctx: pyfuse3.RequestContext) -> pyfuse3.FileInfo:
-		inode, inode_old = self[inode], inode
-		log.debug(f'{Col(inode)}, flags: {Col(flags)}; old_ino: {Col(inode_old)}')
+		log.debug(f'{Col(inode)}, flags: {Col(flags)}; old_ino: {Col(inode)}')
 
 		if inode in self.vfs._inode_fd_map:
 			fd: int = self.vfs._inode_fd_map[inode]
@@ -342,7 +327,6 @@ class BasicOps(VFSOps):
 
 	async def create(self, inode_p: int, name: str, mode: int, flags: int,
 					 ctx: pyfuse3.RequestContext) -> (pyfuse3.FileInfo, pyfuse3.EntryAttributes):
-		inode_p = self[inode_p]
 		cpath: str = os.path.join(self.disk.ino_toTmp(inode_p), fsdecode(name))
 		log.debug(f'{Col(cpath)} in {Col(inode_p)}')
 
@@ -364,15 +348,14 @@ class BasicOps(VFSOps):
 		return f, attr
 
 	async def unlink(self, inode_p: int, name: str, ctx: pyfuse3.RequestContext) -> None:
-		inode_p = self[inode_p]
 		name = fsdecode(name)
 		log.debug(f'{Col(name)} in {Col(inode_p)}')
 		parent = self.disk.ino_toTmp(inode_p)
 		path = os.path.join(parent, name)
+		inode = self.disk.path_to_ino(path)
 		try:
 			if os.path.exists(path):  # file exists in cache
 				os.unlink(path)
-			inode = self.disk.path_to_ino(path)
 		except OSError as exc:
 			raise FUSEError(exc.errno)
 
@@ -386,6 +369,7 @@ class BasicOps(VFSOps):
 		self.journal.log_unlink(inode_p, inode, path)
 		if self.vfs.inLookupCnt(inode):
 			self._forget_path(inode, path)
+			del self.disk[(inode, path)]
 
 	async def read(self, fd: int, offset: int, length: int) -> bytes:
 		try:

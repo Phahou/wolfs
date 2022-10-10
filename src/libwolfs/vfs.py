@@ -173,7 +173,3 @@ class VFS(PathTranslator, CallStackAware):
 			log.debug(f'{Col.BY}forgetting about inode {Col(inode)}')
 			assert inode not in self._inode_fd_map
 			del self._lookup_cnt[inode]
-		# try:
-		#	self.del_inode(inode)
-		# except KeyError:  # may have been deleted
-		#	log.warning(self + f' already deleted {Col.bg(inode)}')

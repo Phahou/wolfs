@@ -92,8 +92,6 @@ class DirentOps(LinkOps):
 		# TODO: log on success
 		#       die.net: Upon successful completion, the rmdir() function shall mark for update the st_ctime and st_mtime fields of the parent directory.
 		#       -> update entries
-
-		inode_p = self[inode_p]
 		parent = self.disk.ino_toTmp(inode_p)
 		cpath = os.path.join(parent, fsdecode(name))
 		inode = self.disk.trans.path_to_ino(cpath)
@@ -134,7 +132,6 @@ class DirentOps(LinkOps):
 			self._forget_path(inode, cpath)
 
 	async def opendir(self, inode: int, ctx: pyfuse3.RequestContext) -> int:
-		inode = self[inode]
 		dirent: DirInfo = cast(DirInfo, self.vfs.inode_path_map[inode])
 		log.info(f"{Col.path(self.disk.ino_toTmp(inode))} contains: {Col(dirent.children)}")
 		# ctx contains gid, uid, pid and umask

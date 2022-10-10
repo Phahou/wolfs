@@ -107,7 +107,7 @@ class InodeTranslator(PathTranslator, DiskBase):
 	def __delitem__(self, inode__path: tuple[int, str]) -> None:
 		"""delete translation inode"""
 		inode, path = inode__path
-		assert inode == self.path_to_ino(path), "Logic Error"
+		assert inode == self.path_to_ino(path), "Logic Error: double deletion"
 
 		rpath = self.toRoot(path)
 		if isinstance(self.__ino_path_map[inode], str):
@@ -170,7 +170,7 @@ class InodeTranslator(PathTranslator, DiskBase):
 				raise ValueError(f"Reused ino {reuse_ino} is not in freed ino set {self.__freed_inos}")
 		else:
 			ino = self.__last_ino + 1
-			self.__last_ino += 1
+			self.__last_ino = ino
 
 		__add_ino_path(ino, path)
 
