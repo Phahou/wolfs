@@ -158,32 +158,6 @@ class VFS(PathTranslator, CallStackAware):
 			self.inode_path_map[inode].src = cast(set, {src_p, info.src})
 			self.inode_path_map[inode].cache = cast(set, {cache_p, info.cache})
 
-	# ============
-	# attr methods
-	# ============
-
-	async def setattr(self,
-			inode: int,
-			attr: pyfuse3.EntryAttributes,
-			fields: pyfuse3.SetattrFields,
-			fh: int,
-			ctx: pyfuse3.RequestContext) -> pyfuse3.EntryAttributes:
-		if fh is None:
-			path_or_fh = self.cpath(inode)
-		else:
-			path_or_fh = fh
-		FileInfo.setattr(attr, fields, path_or_fh, ctx)
-		# todo check if attr now is attr after self.getattr
-		new_attr = self.getattr(inode)
-		assert attr != new_attr, "attr are equal ?"
-		return await new_attr
-
-	async def getattr(self, inode: int, ctx: pyfuse3.RequestContext = None) -> pyfuse3.EntryAttributes:
-		if inode in self._inode_fd_map:  # if isOpened(inode):
-			return FileInfo.getattr(fd=self._inode_fd_map[inode])
-		else:
-			return FileInfo.getattr(path=self.cpath(inode))
-
 	# pyfuse3 specific
 	# ================
 

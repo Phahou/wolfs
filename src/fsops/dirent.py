@@ -64,7 +64,7 @@ class DirentOps(LinkOps):
 		log.info(f" {Col(name)} in {Col(inode_p)} with mode {Col.file(mode & ctx.umask)}")
 
 		# 1. get info of inode_p and stuff
-		parent_path = self.vfs.cpath(inode_p)
+		parent_path = self.disk.ino_toTmp(inode_p)
 		cpath = os.path.join(parent_path, fsdecode(name))
 
 		# 2. check if enough disk space
@@ -94,7 +94,7 @@ class DirentOps(LinkOps):
 		#       -> update entries
 
 		inode_p = self[inode_p]
-		parent = self.vfs.cpath(inode_p)
+		parent = self.disk.ino_toTmp(inode_p)
 		cpath = os.path.join(parent, fsdecode(name))
 		inode = self.disk.trans.path_to_ino(cpath)
 		log.info(f"{Col(inode)}({Col(cpath)}) in {Col(inode_p)}({Col(parent)})")
@@ -136,7 +136,7 @@ class DirentOps(LinkOps):
 	async def opendir(self, inode: int, ctx: pyfuse3.RequestContext) -> int:
 		inode = self[inode]
 		dirent: DirInfo = cast(DirInfo, self.vfs.inode_path_map[inode])
-		log.info(f"{Col.path(self.vfs.cpath(inode))} contains: {Col(dirent.children)}")
+		log.info(f"{Col.path(self.disk.ino_toTmp(inode))} contains: {Col(dirent.children)}")
 		# ctx contains gid, uid, pid and umask
 		return inode
 
@@ -165,7 +165,7 @@ class DirentOps(LinkOps):
 			return sorted(entries) if len(entries) > 0 else None
 
 		if off == 0:
-			path = self.vfs.cpath(inode)
+			path = self.disk.ino_toTmp(inode)
 			log.info(f'{Col(path)}')
 
 			# for posix compatibility we freeze the directory entries returned between
@@ -204,4 +204,4 @@ class DirentOps(LinkOps):
 
 	async def releasedir(self, fh: int) -> None:
 		# same as normal release() no more fh are using it
-		log.info(f'Released Dir: {Col.path(self.vfs.cpath(fh))}')
+		log.info(f'Released Dir: {Col.path(self.disk.ino_toTmp(fh))}')

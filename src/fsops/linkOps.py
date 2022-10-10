@@ -16,7 +16,7 @@ class LinkOps(XAttrsOps):
 	async def readlink(self, inode: int, ctx: RequestContext) -> bytes:
 		raise FUSEError(errno.ENOSYS)
 		# for reading softlinks
-		path: Path = self.vfs.cpath(inode)
+		path: Path = self.disk.ino_toTmp(inode)
 		try:
 			target = os.readlink(path)
 		except OSError as exc:
@@ -28,10 +28,10 @@ class LinkOps(XAttrsOps):
 		# hardlink
 		log.info()
 		new_name = fsdecode(new_name)
-		parent: Path = self.vfs.cpath(new_inode_p)
+		parent: Path = self.disk.ino_toTmp(new_inode_p)
 		path: str = os.path.join(parent, new_name)
 		try:
-			os.link(self.vfs.cpath(inode), path, follow_symlinks=False)
+			os.link(self.disk.ino_toTmp(inode), path, follow_symlinks=False)
 		except OSError as exc:
 			raise FUSEError(exc.errno)
 		# self.vfs.add_path(inode, path)
