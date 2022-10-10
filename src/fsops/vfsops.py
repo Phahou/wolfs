@@ -49,16 +49,15 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 	# ============
 	def add_subDirectories(self, child_inodes: list[int],
 		inode_p: int = 0, wolfs_inode_path: str = "") -> DirInfo:
-		trans = self.disk.trans
 		assert inode_p >= 0\
-			or (wolfs_inode_path != "" and trans.toRoot(wolfs_inode_path) in trans._InodeTranslator__path_ino_map)
+			or (wolfs_inode_path != "" and self.disk.toRoot(wolfs_inode_path) in self.disk._InodeTranslator__path_ino_map)
 
 		if inode_p > 0:
 			# TODO: path_to_ino -> inode_to_cpath should be in the same class as they are interchangeable
-			assert_path: str = self.disk.trans.toRoot(self.disk.ino_toTmp(inode_p))
-			assert inode_p == trans.path_to_ino(assert_path)
+			assert_path: str = self.disk.toRoot(self.disk.ino_toTmp(inode_p))
+			assert inode_p == self.disk.path_to_ino(assert_path)
 		else:
-			inode_p = trans.path_to_ino(wolfs_inode_path)
+			inode_p = self.disk.path_to_ino(wolfs_inode_path)
 			assert inode_p == self.disk.ino_toTmp(inode_p)
 
 		assert inode_p not in child_inodes
@@ -71,12 +70,12 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 		return directory
 
 	def add_Directory(self, path: str) -> DirInfo:
-		wolfs_inode: int = self.disk.trans.path_to_ino(path)
+		wolfs_inode: int = self.disk.path_to_ino(path)
 
 		# get inode info about parent
 
-		inode_p_path = self.disk.trans.getParent(path)
-		inode_p = self.disk.trans.path_to_ino(inode_p_path)
+		inode_p_path = self.disk.getParent(path)
+		inode_p = self.disk.path_to_ino(inode_p_path)
 
 		entry = FileInfo.getattr(path=path)
 		entry.st_ino = wolfs_inode
@@ -86,7 +85,7 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 			or wolfs_inode == DiskBase.ROOT_INODE  # exception so that '/' redirects to itself
 		assert entry.st_ino == wolfs_inode
 		assert Path(path).is_dir()
-		assert self.disk.trans.path_to_ino(inode_p_path) == inode_p
+		assert self.disk.path_to_ino(inode_p_path) == inode_p
 
 		return self.vfs._add_Directory(inode_p, wolfs_inode, path, entry)
 
@@ -112,7 +111,7 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 		st_size: int = self.vfs.inode_path_map[inode].entry.st_size
 		if not f.exists():
 			self.remote.makeAvailable()
-			self.__fetchFile(self.disk.trans.toSrc(f), st_size)
+			self.__fetchFile(self.disk.toSrc(f), st_size)
 		return f
 
 	async def rename(self,
@@ -124,7 +123,7 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 			ctx: pyfuse3.RequestContext) -> None:
 		# if inode_p_old == inode_p_new:
 		# 	# just rename the paths
-		# 	path: str = self.disk.trans.ino_to_path(inode_p_old)
+		# 	path: str = self.disk.ino_to_path(inode_p_old)
 
 		if flags != 0:
 			raise FUSEError(errno.EINVAL)
@@ -304,7 +303,7 @@ class BasicOps(VFSOps):
 	async def getattr(self, inode: int, ctx: pyfuse3.RequestContext = None) -> pyfuse3.EntryAttributes:
 		entry = await self.__getattr(inode, ctx)
 		path = self.disk.ino_toTmp(inode)
-		entry.st_ino = self.disk.trans.path_to_ino(path)
+		entry.st_ino = self.disk.path_to_ino(path)
 		return entry
 
 	# File methods (functions with file descriptors)
@@ -396,7 +395,7 @@ class BasicOps(VFSOps):
 
 	def __fsync_with_remote(self, cache: Path, flags: int, write_ops: list[tuple[int, int]]) -> None:
 		"""Should work with newly created files too as we are re-using the flags"""
-		remote = self.disk.trans.toSrc(cache)
+		remote = self.disk.toSrc(cache)
 		fd_cache, fd_remote = os.open(cache, flags), os.open(remote, flags)
 		for offset, buflen in write_ops:
 			os.lseek(fd_cache, offset, os.SEEK_SET)

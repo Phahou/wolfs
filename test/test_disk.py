@@ -81,26 +81,26 @@ class TestDisk:
 		# type str tests
 		root_file = "test.py"
 		# check if a root file is correctly converted
-		assert disk.trans.toSrc(root_file) == Path(f"{tmpdir_source}/{root_file}")
-		assert disk.trans.toTmp(root_file) == Path(f"{tmpdir_cache}/{root_file}")
-		assert disk.trans.toRoot(root_file) == f"/{root_file}"
+		assert disk.toSrc(root_file) == Path(f"{tmpdir_source}/{root_file}")
+		assert disk.toTmp(root_file) == Path(f"{tmpdir_cache}/{root_file}")
+		assert disk.toRoot(root_file) == f"/{root_file}"
 
 		subdir = "dir/test.py"
 		# check if a file in a subdirectory works
-		assert disk.trans.toSrc(subdir) == Path(f"{tmpdir_source}/{subdir}")
-		assert disk.trans.toTmp(subdir) == Path(f"{tmpdir_cache}/{subdir}")
-		assert disk.trans.toRoot(subdir) == f"/{subdir}"
+		assert disk.toSrc(subdir) == Path(f"{tmpdir_source}/{subdir}")
+		assert disk.toTmp(subdir) == Path(f"{tmpdir_cache}/{subdir}")
+		assert disk.toRoot(subdir) == f"/{subdir}"
 
 		# check if conversion works
 		root_file_p = Path(root_file)
-		assert disk.trans.toSrc(root_file_p) == disk.trans.toSrc(root_file)
-		assert disk.trans.toTmp(root_file_p) == disk.trans.toTmp(root_file)
-		assert disk.trans.toRoot(root_file_p) == disk.trans.toRoot(root_file)
+		assert disk.toSrc(root_file_p) == disk.toSrc(root_file)
+		assert disk.toTmp(root_file_p) == disk.toTmp(root_file)
+		assert disk.toRoot(root_file_p) == disk.toRoot(root_file)
 
 		subdir_p = Path(subdir)
-		assert disk.trans.toSrc(subdir_p) == disk.trans.toSrc(subdir)
-		assert disk.trans.toTmp(subdir_p) == disk.trans.toTmp(subdir)
-		assert disk.trans.toRoot(subdir_p) == disk.trans.toRoot(subdir)
+		assert disk.toSrc(subdir_p) == disk.toSrc(subdir)
+		assert disk.toTmp(subdir_p) == disk.toTmp(subdir)
+		assert disk.toRoot(subdir_p) == disk.toRoot(subdir)
 
 	def test_canStore(self, tmpdir_factory):
 		tmpdir_source, tmpdir_cache = get_src_cache_directory_pair(tmpdir_factory)
@@ -238,7 +238,7 @@ class TestDisk:
 		tmpdir_source, tmpdir_cache = get_src_cache_directory_pair(tmpdir_factory)
 		disk = prep_Disk(tmpdir_source, tmpdir_cache, maxCacheSize=1)
 		path: Path = Path(os.path.join(tmpdir_source, name_generator()))
-		rpath = disk.trans.toRoot(path)
+		rpath = disk.toRoot(path)
 
 		# 1. case: path is unkown -> new ino
 		ino = disk.path_to_ino(path)
@@ -248,13 +248,13 @@ class TestDisk:
 		assert disk.path_to_ino(path) == ino, f"If known the same ino should be returned"
 
 		# 3. case: reusing an ino (in rename ops)
-		del disk.trans[(ino, path.__str__())]
+		del disk[(ino, path.__str__())]
 		ino_rpath = disk._InodeTranslator__path_ino_map.get(rpath)
 		assert ino_rpath is None, f"{disk._InodeTranslator__path_ino_map} should contain {path} as it was inserted"
 		__freed_inos = disk._InodeTranslator__freed_inos
 		assert ino in __freed_inos, f"{__freed_inos} should contain {ino} as it was deleted"
 
-		disk.trans.path_to_ino(path, reuse_ino=ino)
+		disk.path_to_ino(path, reuse_ino=ino)
 		assert disk._InodeTranslator__path_ino_map.get(rpath) == ino, f"Should have reused the same ino"
 
 		# 4. case: inodes grow only larger

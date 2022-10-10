@@ -77,8 +77,8 @@ class Journal:
 		:param cache_file: cached file to be synced
 		:param write_ops: history of write operations to file preceeding last sync
 		"""
-		remote: Path = self.disk.trans.toSrc(cache_file)
-		if cache_file != self.disk.trans.toTmp(cache_file):
+		remote: Path = self.disk.toSrc(cache_file)
+		if cache_file != self.disk.toTmp(cache_file):
 			c = LogEntry(op=File_Ops.CREATE, inode=0, path=cache_file)
 			for entry in self.__history:
 				if entry.path == cache_file.__str__():
@@ -136,7 +136,7 @@ class Journal:
 			os.close(fd)
 
 		def __rename(src_path: Path, logEntry: LogEntry) -> None:
-			path_new: Path = self.disk.trans.toSrc(getattr(logEntry, 'path_new'))
+			path_new: Path = self.disk.toSrc(getattr(logEntry, 'path_new'))
 			os.rename(src_path, path_new)
 
 		switcher = {
@@ -205,7 +205,7 @@ class Journal:
 		i = 0
 		while i < len_history:
 			logEntry = compacted_history[i]
-			src_path = self.disk.trans.toSrc(logEntry.path)
+			src_path = self.disk.toSrc(logEntry.path)
 			i = self.__replayFile_Op(logEntry.op, src_path, logEntry, i)
 			if i % 25 == 0:
 				print(f'Processed {i} items')
@@ -243,9 +243,9 @@ class Journal:
 
 	def log_create(self, inode: int, path: str, flags: int) -> None:
 		self.__markDirty(inode)
-		ino_p = self.disk.trans.path_to_ino(Path(path).parent.__str__())
+		ino_p = self.disk.path_to_ino(Path(path).parent.__str__())
 		self.__markDirty(ino_p)
-		e: LogEntry = LogEntry(File_Ops.CREATE, inode, self.disk.trans.toTmp(path).__str__())
+		e: LogEntry = LogEntry(File_Ops.CREATE, inode, self.disk.toTmp(path).__str__())
 		e.flags = flags
 		self.__history.append(e)
 

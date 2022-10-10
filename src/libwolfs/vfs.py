@@ -92,8 +92,6 @@ class VFS(PathTranslator, CallStackAware):
 		# post-condition:
 		assert directory == self.inode_path_map[wolfs_inode]
 		assert wolfs_inode in parent.children
-		# TODO: merge vfs and disk translators into disk or make a new one called FSTranslator
-		# assert inode_path != self.disk.trans.getParent()
 
 		return directory
 

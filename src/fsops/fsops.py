@@ -97,20 +97,20 @@ class Wolfs(DirentOps):
 
 		def add_subdirectories(dirpath: str, dirnames: [str], filenames: [str]) -> (int, [str]):
 			dir_attrs = FileInfo.getattr(path=dirpath)
-			dir_inode = self.disk.trans.path_to_ino(dirpath)
+			dir_inode = self.disk.path_to_ino(dirpath)
 			dir_attrs.st_ino = dir_inode
 
 			# calculate inode_p by deriving the parent path
-			# root_path: str = self.disk.trans.toRoot(dirpath)
+			# root_path: str = self.disk.toRoot(dirpath)
 			# inode_p_path: str = '/'
 			# if j := root_path.rfind('/'):  # != 0
 			# 	inode_p_path = root_path[:j]
-			# inode_p: int = self.disk.trans.path_to_ino(inode_p_path)
+			# inode_p: int = self.disk.path_to_ino(inode_p_path)
 
 			# filter out softlinks and prepare to absolute paths
 			abs_dirnames = list(filter(lambda x: not islink(x), map(lambda p: os.path.join(dirpath, p), dirnames)))
 			abs_filenames = list(filter(lambda x: not islink(x), map(lambda p: os.path.join(dirpath, p), filenames)))
-			subdir_inos = list(map(lambda p: self.disk.trans.path_to_ino(p), abs_dirnames))
+			subdir_inos = list(map(lambda p: self.disk.path_to_ino(p), abs_dirnames))
 
 			# TODO:
 			#   uhhh ich denk wir haben immernoch das problem das die einträge doppelt sind bei Ordnern bei Dateien ist es nicht so
@@ -130,7 +130,7 @@ class Wolfs(DirentOps):
 
 			for f in filenames:
 				file_attrs = FileInfo.getattr(path=f)
-				st_ino = self.disk.trans.path_to_ino(f)
+				st_ino = self.disk.path_to_ino(f)
 				file_attrs.st_ino = st_ino
 				push_to_queue(st_ino, file_attrs)
 

@@ -39,11 +39,11 @@ class LinkOps(XAttrsOps):
 
 	async def symlink(self, inode_p: int, name: str, target: str, ctx: RequestContext) -> EntryAttributes:
 		raise FUSEError(errno.ENOSYS)
-		parent_path: str = self.disk.trans.ino_to_rpath(inode_p)
+		parent_path: str = self.disk.ino_to_rpath(inode_p)
 		assert not isinstance(parent_path, set), f"Something went horrendously wrong. A directory and has 2 hardlink paths: {parent_path}"
 		name: str = fsdecode(name)
 		symlink_path: str = parent_path + "/" + name
-		ino: int = self.disk.trans.path_to_ino(symlink_path)
+		ino: int = self.disk.path_to_ino(symlink_path)
 		try:
 			os.symlink(target, symlink_path)
 			os.chown(symlink_path, ctx.uid, ctx.gid, follow_symlinks=False)
@@ -58,7 +58,7 @@ class LinkOps(XAttrsOps):
 		# parent: Path = self.vfs.inode_to_cpath(inode_p)
 		# path: str = os.path.join(parent, name)
 		#stat = os.lstat(path)
-		ino = self.disk.trans.path_to_ino(path)
+		ino = self.disk.path_to_ino(path)
 		lkup = self.vfs._lookup_cnt[ino]
 		self.vfs.add_path(ino, path, entry)
 

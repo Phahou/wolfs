@@ -43,7 +43,7 @@ class Disk(Cache):
 
 		actually it is like generate in betweens
 		"""
-		dst: Path = self.trans.toTmp(src)
+		dst: Path = self.toTmp(src)
 
 		if added_folders is None:
 			added_folders = []
@@ -86,10 +86,10 @@ class Disk(Cache):
 			# TODO: maybe try to get filesize via lstat (like stat but supports links)
 			src = path.__str__() # if isinstance(path, Path) else path
 			assert not os.path.islink(src), f"{self} {SOFTLINK_DISABLED_ERROR}"
-			assert self.trans.toSrc(src) == path, f"{self} input is not from remotefs"
+			assert self.toSrc(src) == path, f"{self} input is not from remotefs"
 
 			# take into account directories which have to be created
-			cpath = self.trans.toTmp(path)
+			cpath = self.toTmp(path)
 			in_between_dir_sizes = 0
 			while not cpath.parent.exists():
 				in_between_dir_sizes += self.MIN_DIR_SIZE
@@ -109,15 +109,15 @@ class Disk(Cache):
 		"""
 
 		# handling of create and mkdir (files don't exist yet so os.stat(path_) will throw an error)
-		path_: str = self.trans.toSrc(path).__str__()
+		path_: str = self.toSrc(path).__str__()
 		if not os.path.exists(path_):
-			path_ = self.trans.toTmp(path).__str__()
+			path_ = self.toTmp(path).__str__()
 
 		# get info about tracked file
 		timestamp: int = getattr(os.stat(path_), self.time_attr) // self.__NANOSEC_PER_SEC__
 		size: int = os.path.getsize(path_)
-		src_path: str = self.trans.toSrc(path).__str__()
-		ino: int = self.trans.path_to_ino(src_path, reuse_ino=reuse_ino)
+		src_path: str = self.toSrc(path).__str__()
+		ino: int = self.path_to_ino(src_path, reuse_ino=reuse_ino)
 		tracked_path = self.in_cache.get(timestamp)
 
 		# save meta info
@@ -137,7 +137,7 @@ class Disk(Cache):
 
 	def untrack(self, path: str) -> None:
 		"""Doesn't track `path` anymore and frees up its reserved size. Can be seen as a 'delete'"""
-		src_path: str = self.trans.toSrc(path).__str__()
+		src_path: str = self.toSrc(path).__str__()
 		timestamp = self.path_timestamp.get(src_path)
 		if timestamp is None:
 			return
@@ -166,7 +166,7 @@ class Disk(Cache):
 				del in_cache[timestamp]
 
 			del self.path_timestamp[src_path]
-			self._cached_inos.remove(self.trans.path_to_ino(src_path))
+			self._cached_inos.remove(self.path_to_ino(src_path))
 			self._current_CacheSize -= size
 		except KeyError as e:
 			log.error("KeyError Exception that shouldnt have happened happened")
@@ -190,21 +190,21 @@ class Disk(Cache):
 		  a dirty file which has not yet been sync'd and data would be lost
 		  calls assert if this happens at the moment
 		"""
-		assert self.trans.toSrc(path) == path, f"{path} doesn't have {self.trans.sourceDir} prefix"
+		assert self.toSrc(path) == path, f"{path} doesn't have {self.sourceDir} prefix"
 		self.__make_room_for_path(force, path, open_paths)
 
 		if self.canStore(path):
-			dest = self.trans.toTmp(path)
+			dest = self.toTmp(path)
 			addedDirsSize, addedFolders = self.__cp_path(path, dest)
 			self._current_CacheSize += addedDirsSize
 			# folders which are created by cp2Dir are untracked and should be tracked...
 			# elements in cache doesn't model reality (too few entries too many undocumented)
 			for parent in addedFolders:
-				self.trans.path_to_ino(parent)
+				self.path_to_ino(parent)
 				self.track(parent.__str__())
 
 			if addedDirsSize == 0:
-				self.trans.path_to_ino(dest)
+				self.path_to_ino(dest)
 				self.track(path.__str__())
 
 			# TODO: use xattributes later and make a custom field:
@@ -235,7 +235,7 @@ class Disk(Cache):
 				log.warning(f"Deleted all non open files and still couldn't store file: {path}")
 				raise FUSEError(errno.EDQUOT)
 
-			cpath: Path = Path(self.trans.toTmp(src_path))
+			cpath: Path = Path(self.toTmp(src_path))
 
 			# skip open files (we can't sync and close them as they might be written / read from)
 			if cpath in open_paths:

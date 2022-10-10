@@ -94,10 +94,10 @@ class DirentOps(LinkOps):
 		#       -> update entries
 		parent = self.disk.ino_toTmp(inode_p)
 		cpath = os.path.join(parent, fsdecode(name))
-		inode = self.disk.trans.path_to_ino(cpath)
+		inode = self.disk.path_to_ino(cpath)
 		log.info(f"{Col(inode)}({Col(cpath)}) in {Col(inode_p)}({Col(parent)})")
 
-		# check if cpath is softlink into a flag (hardlinks to dirs dont exist)
+		# check if cpath is softlink into a flag (hardlinks to dirs don't exist)
 
 		# check if cpath is present in tmp dir
 		# 	yes -> use a native rmdir
@@ -106,14 +106,14 @@ class DirentOps(LinkOps):
 		#   		-> yes:	would it be possible to	remove the directory with current permissions and so on ?
 		#				-> 	yes: do a "virtual" rmdir
 		#					another way would be: mkdir with saved DirInfo and then
-		#					deleting it but that doesnt make much sense at all
+		#					deleting it but that doesn't make much sense at all
 		#			-> no:
 		#				erno.ENOEXT (dir doesnnot exist)
 		#
 
 		# update parent inode according to die.net
 		#   either way -> update dirinfo of inode_p and delete path from dirinfo of path
-		#		if dirinfo has no more links then delete inode of path too as (hardlink case)
+		#		if dirinfo has no more links, then delete inode of path too as (hardlink case)
 
 		# no exceptions: log in journal that directory has to be removed later
 		# exception: 	 log nothing return
@@ -165,8 +165,8 @@ class DirentOps(LinkOps):
 			log.info(f'{Col(path)}')
 
 			# for posix compatibility we freeze the directory entries returned between
-			# each readdir cycle. This ensures that we dont skip any entries or report them twice
-			# as required by pyfuse. This doesnt mean opening the same directory twice wouldnt
+			# each readdir cycle. This ensures that we don't skip any entries or report them twice
+			# as required by pyfuse. This doesn't mean opening the same directory twice wouldn't
 			# show the same results by different processes
 			if freezed_dirents := freeze_dirents():
 				self.freezed_dirents[inode] = freezed_dirents

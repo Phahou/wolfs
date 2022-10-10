@@ -34,9 +34,6 @@ class Cache(InodeTranslator):
 		self.path_timestamp: dict[str, int] = dict()
 		self._cached_inos: set[int] = set()
 
-		# compatibility to old code use remove later
-		self.trans = self
-
 	# fullness of cache
 	def __le__(self, other: int) -> bool:
 		"""Is the cache large enough to hold `size` ?"""
