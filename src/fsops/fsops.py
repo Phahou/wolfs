@@ -144,7 +144,7 @@ class Wolfs(DirentOps):
 		for k, v in self.vfs.inode_path_map.items():
 			assert k == v.entry.st_ino
 			if isinstance(v, DirInfo):
-				self.vfs.inode_path_map[k] = DirInfo(cast(Path, v.src), cast(Path, v.cache), v.entry, sorted(v.children))
+				self.vfs.inode_path_map[k] = DirInfo(v.entry, sorted(v.children))
 
 		return transfer_q
 
@@ -152,20 +152,15 @@ class Wolfs(DirentOps):
 		print(f'{Col.B}Transfering files...{Col.END}')
 		while not transfer_q.empty() and not self.disk.isFull(use_threshold=True):
 			timestamp, (inode, file_size) = transfer_q.pop_nowait()
-			info: FileInfo = self.vfs.inode_path_map[inode]
-			info_rpath = self.disk.ino_to_rpath(info.entry.st_ino)
+			ino: FileInfo = self.vfs.inode_path_map[inode].entry.st_ino
+			info_rpath = self.disk.ino_to_rpath(ino)
 			info_src = self.disk.toSrc(info_rpath)
-			info_cache = self.disk.toTmp(info_src)
-			assert info.src == info_src, "Consistency Error"
-			assert info.cache == info_cache, "Consistency Error"
-			path, dst = cast(Path, info.src), info.cache
-
 			# skip symbolic links for now
-			if os.path.islink(path):
+			if os.path.islink(info_src):
 				continue
 
 			try:
-				self.disk.cp2Cache(path)
+				self.disk.cp2Cache(info_src)
 			except NotEnoughSpaceError:
 				# filter the Queue
 				purged_list = MaxPrioQueue()

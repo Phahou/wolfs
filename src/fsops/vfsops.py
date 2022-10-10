@@ -132,11 +132,8 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 		def rename_childs(childs: list[int], parent_new: str) -> None:
 			for child in childs:
 				child_info = self.vfs.inode_path_map[child]
-				cache_disk_path: Path = self.disk.toTmp(self.disk.ino_to_rpath(child_info.entry.st_ino))
-				cache: Path = child_info.cache
-				assert cache == cache_disk_path, "Consistency Error"
+				cache: Path = self.disk.ino_toTmp(child_info.entry.st_ino)
 				assert isinstance(cache, Path), f"{self} {SOFTLINK_DISABLED_ERROR}"
-				self.vfs.inode_path_map[child].cache = Path(cache.__str__().replace(cache.parent.__str__(), parent_new))
 				if isinstance(child_info, DirInfo):
 					rename_childs(child_info.children, parent_new)
 
@@ -174,9 +171,8 @@ class VFSOps(pyfuse3.Operations, CallStackAware):
 			ino_old, path_old = Col(ino_old), Col(path_old)
 			children, cache_path = Col(children), Col(cache_path)
 			log.debug(f'Trying to delete {ino_old}({path_old}) from {children} ({cache_path})')
-		info_old_p_cache_path: str = self.disk.toTmp(self.disk.ino_to_rpath(info_old_p.entry.st_ino)).__str__()
-		logMsg(inode_p_old, path_old, old_children, info_old_p.cache.__str__())
-		logMsg(inode_p_old, path_old, old_children, info_old_p_cache_path)
+		info_old_p_cache: str = self.disk.ino_toTmp(info_old_p.entry.st_ino).__str__()
+		logMsg(inode_p_old, path_old, old_children, info_old_p_cache)
 
 		# remove from old parent
 		old_children.remove(ino_old)

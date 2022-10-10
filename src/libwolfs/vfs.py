@@ -32,7 +32,8 @@ class VFS(PathTranslator, CallStackAware):
 		super().__init__(mount_info)
 
 		# TODO: make btree out of this datatype with metafile stored somewhere
-		root_info: DirInfo = DirInfo(mount_info.sourceDir, mount_info.cacheDir, DirInfo.getattr(mount_info.cacheDir), [])
+		# TODO: check if getattr of cacheDir should be the same as disks statvfs as it's the root dir
+		root_info: DirInfo = DirInfo(DirInfo.getattr(mount_info.cacheDir), [])
 		self.inode_path_map: dict[int, Union[FileInfo, DirInfo]] = {Disk.ROOT_INODE: root_info}
 
 		# inode related: (used for memory management)
@@ -48,10 +49,6 @@ class VFS(PathTranslator, CallStackAware):
 		# todo: needs to hold information that remote has to be deleted too
 		# TODO: also change info of parent inode
 		del self.inode_path_map[inode]
-
-	def set_inode_path(self, inode: int, path: Path_str) -> None:
-		self.inode_path_map[inode].src = self.toSrc(path)
-		self.inode_path_map[inode].cache = self.toTmp(path)
 
 	# def set_inode_entry(self, inode: int, entry: pyfuse3.EntryAttributes) -> None:
 	#	self.inode_path_map[inode].entry = entry
@@ -79,8 +76,7 @@ class VFS(PathTranslator, CallStackAware):
 		wolfs_inode: int,
 		inode_path: str,
 		entry: pyfuse3.EntryAttributes) -> DirInfo:
-		src_p, cache_p = self.toSrc(inode_path), self.toTmp(inode_path)
-		directory = DirInfo(src_p, cache_p, entry, [])
+		directory = DirInfo(entry, [])
 
 		# "create" directory in inode table
 		self.inode_path_map[wolfs_inode] = directory
@@ -118,28 +114,14 @@ class VFS(PathTranslator, CallStackAware):
 		#     => this rework should simplify most of this class
 		assert inode == file_attrs.st_ino, f'inode and file_attrs.st_ino have to be the same as file_attrs.st_ino are for lookup'
 		self._lookup_cnt[inode] += 1
-		src_p, cache_p = self.toSrc(path), self.toTmp(path)
 
 		# With hardlinks, one inode may map to multiple paths.
 		if inode not in self.inode_path_map:
-			self.inode_path_map[inode] = FileInfo(src_p, cache_p, file_attrs)
+			self.inode_path_map[inode] = FileInfo(file_attrs)
 			return
 
 		# no hardlinks for directories
-		assert not os.path.isdir(path), f"{self}{HARDLINK_DIR_ILLEGAL_ERROR} | (path: {path})"
-
-		# generate hardlink from path as inode is already in map
-		info = self.inode_path_map[inode]
-		# we only need to check one entry as both are always the same type
-		if isinstance(info.src, set):
-			assert isinstance(info.cache, set), f"{self} cache & src should always be the same type!"
-			# saving both to be able to sync later to srcDir
-			info.src.add(src_p)
-			info.cache.add(cache_p)
-		elif info.src != src_p:
-			assert False, f"{self}{SOFTLINK_DISABLED_ERROR}"
-			self.inode_path_map[inode].src = cast(set, {src_p, info.src})
-			self.inode_path_map[inode].cache = cast(set, {cache_p, info.cache})
+		assert not os.path.isdir(path), f"Programming Error: {self}{HARDLINK_DIR_ILLEGAL_ERROR} | (path: {path}) use add_Directory()"
 
 	# pyfuse3 specific
 	# ================

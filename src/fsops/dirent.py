@@ -148,9 +148,8 @@ class DirentOps(LinkOps):
 				for child_inode in childs:
 					try:
 						info: Union[FileInfo, DirInfo] = self.vfs.inode_path_map[child_inode]
-						cache_path: Path = self.disk.toTmp(self.disk.ino_to_rpath(child_inode))
-						assert cache_path == info.cache, "Consistency Error"
-						entries.append((child_inode, info.cache.name, info.entry))  # type: ignore
+						cache_path: Path = self.disk.ino_toTmp(child_inode)
+						entries.append((child_inode, cache_path.name, info.entry))  # type: ignore
 					except KeyError:
 						# TODO: ignore missing symlinks for now
 						log.error(f'{Col.BR}Ignored FileInfo of {Col.BG}{child_inode}')

@@ -13,13 +13,8 @@ import stat as stat_m
 
 class FileInfo:
 
-	def __init__(self, src: Path, cache: Path, fileAttrs: EntryAttributes) -> None:
-		self.src: Union[Path, set[Path]] = Path(src)
-		self.cache: Union[Path, set[Path]] = Path(cache)
+	def __init__(self, fileAttrs: EntryAttributes) -> None:
 		self.entry: EntryAttributes = fileAttrs
-
-	def __str__(self) -> str:
-		return f'src:{self.src} | cache:{self.cache}'
 
 	@staticmethod
 	def getattr(path: Union[str, Path] = None, fd: int = None) -> EntryAttributes:
@@ -126,9 +121,9 @@ class listset(list):
 		super(listset, self).__add__(other)
 
 class DirInfo(FileInfo):
-	def __init__(self, src: Path, cache: Path, fileAttrs: EntryAttributes, child_inodes: list[int]) -> None:
-		super().__init__(src, cache, fileAttrs)
+	def __init__(self, fileAttrs: EntryAttributes, child_inodes: list[int]) -> None:
+		super().__init__(fileAttrs)
 		self.children: listset[int] = listset(child_inodes)
 
 	def __str__(self) -> str:
-		return f'src:{self.src} | cache:{self.cache} | childs:{self.children}'
+		return f'childs:{self.children}'
