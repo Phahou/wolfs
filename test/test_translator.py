@@ -243,16 +243,6 @@ class TestInodeTranslator:
 		assert trans.toRoot(tmp_f) == trans.ino_to_rpath(ino)
 		assert trans.toTmp(tmp_f) == trans.ino_toTmp(ino)
 
-	def test_ino_toTmp_same_as_cpath(self):
-		trans = self.translator
-		mount_info = MountFSDirectoryInfo(self.src.name, self.cache.name, self.cache.name)
-		vfs = VFS(mount_info)
-		ino = trans.path_to_ino(self.temp_f.name)
-		entry = EntryAttributes()
-		entry.st_ino = ino
-		vfs.add_path(ino, self.temp_f.name, entry)
-		assert trans.ino_toTmp(ino) == vfs.cpath(ino)
-
 	def test_ino_toTmp_hardlinks(self):
 		trans = self.translator
 		tmp_f = self.temp_f.name

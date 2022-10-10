@@ -56,23 +56,6 @@ class VFS(PathTranslator, CallStackAware):
 	# def set_inode_entry(self, inode: int, entry: pyfuse3.EntryAttributes) -> None:
 	#	self.inode_path_map[inode].entry = entry
 
-	# ==============
-	# inode handling
-	# ==============
-
-	def cpath(self, inode: int) -> Path:
-		"""Maps inodes to paths. Might raise `FUSEError(errno.ENOENT)`"""
-		log.debug("Deprecated use InodeTranslator.ino_toTmp() instead")
-		try:
-			val = self.inode_path_map[inode].cache
-		except KeyError:  # file likely doesnt exist. Logic error otherwise
-			log.error(f'inode: {Col(inode)} has no path defined')
-			raise FUSEError(errno.ENOENT)
-
-		if isinstance(val, set):
-			val = next(iter(val))  # In case of hardlinks, pick any path
-		return val
-
 	# inode <-> path funcs
 	# ====================
 
